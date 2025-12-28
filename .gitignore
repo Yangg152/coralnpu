@@ -17,4 +17,4 @@ tests/uvm/vc_hdrs.h
 # python
 __pycache__
 #toolchain
-toolchain/build_scripts
+toolchain/build_scripts/
