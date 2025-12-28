@@ -39,13 +39,22 @@ int main(int argc, char **argv) {
   MemArea rom("TOP.chip_verilator.i_coralnpu_soc.i_rom.u_prim_rom", 0x8000 / 4,
               4);
   MemArea sram("TOP.chip_verilator.i_coralnpu_soc.i_sram", 0x400000 / 4, 4);
+  // MemArea itcm(
+  //     "TOP.chip_verilator.i_coralnpu_soc.i_coralnpu_core.coreAxi.itcm.sram."
+  //     "sramModules_0",
+  //     itcm_size / 16, 16);
+  // MemArea dtcm(
+  //     "TOP.chip_verilator.i_coralnpu_soc.i_coralnpu_core.coreAxi.dtcm.sram."
+  //     "sramModules_0",
+  //     dtcm_size / 16, 16);
+  // 修改 ITCM 路径
   MemArea itcm(
-      "TOP.chip_verilator.i_coralnpu_soc.i_coralnpu_core.coreAxi.itcm.sram."
-      "sramModules_0",
+      "TOP.chip_verilator.i_coralnpu_soc.i_chisel_subsystem.instantiatedModules_0_2.coreAxi.itcm.sram.sramModules_0", 
       itcm_size / 16, 16);
+
+  // 修改 DTCM 路径
   MemArea dtcm(
-      "TOP.chip_verilator.i_coralnpu_soc.i_coralnpu_core.coreAxi.dtcm.sram."
-      "sramModules_0",
+      "TOP.chip_verilator.i_coralnpu_soc.i_chisel_subsystem.instantiatedModules_0_2.coreAxi.dtcm.sram.sramModules_0", 
       dtcm_size / 16, 16);
 
   memutil.RegisterMemoryArea("rom", 0x10000000, &rom);

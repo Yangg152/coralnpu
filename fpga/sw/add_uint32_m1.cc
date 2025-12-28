@@ -16,20 +16,20 @@
 
 #include <riscv_vector.h>
 
-uint32_t in_buf_1[16] __attribute__((aligned(16)));
-uint32_t in_buf_2[16] __attribute__((aligned(16)));
-uint32_t out_buf[16] __attribute__((aligned(16)));
+// uint32_t in_buf_1[16] __attribute__((aligned(16)));
+// uint32_t in_buf_2[16] __attribute__((aligned(16)));
+// uint32_t out_buf[16] __attribute__((aligned(16)));
 
-void add_u32_m1(const uint32_t *in_buf_1, const uint32_t *in_buf_2,
-                uint32_t *out_buf) {
-  vuint32m1_t input_v1 = __riscv_vle32_v_u32m1(in_buf_1, 4);
-  vuint32m1_t input_v2 = __riscv_vle32_v_u32m1(in_buf_2, 4);
-  vuint32m1_t add_result = __riscv_vadd_vv_u32m1(input_v1, input_v2, 4);
-  __riscv_vse32_v_u32m1(out_buf, add_result, 4);
-}
+// void add_u32_m1(const uint32_t *in_buf_1, const uint32_t *in_buf_2,
+//                 uint32_t *out_buf) {
+//   vuint32m1_t input_v1 = __riscv_vle32_v_u32m1(in_buf_1, 4);
+//   vuint32m1_t input_v2 = __riscv_vle32_v_u32m1(in_buf_2, 4);
+//   vuint32m1_t add_result = __riscv_vadd_vv_u32m1(input_v1, input_v2, 4);
+//   __riscv_vse32_v_u32m1(out_buf, add_result, 4);
+// }
 
 int main(int argc, char **argv) {
-  add_u32_m1(in_buf_1, in_buf_2, out_buf);
+  //add_u32_m1(in_buf_1, in_buf_2, out_buf);
 
   // Configure UART1.
   // The NCO is calculated as: (baud_rate * 2^20) / clock_frequency

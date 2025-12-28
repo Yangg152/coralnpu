@@ -107,10 +107,34 @@ module Sram_512x128(
 ///////////////////////////
 ////// Generic SRAM ///////
 ///////////////////////////
-  reg [127:0] mem [0:511];
+  reg [127:0] mem [0:511]/* verilator public */;
   reg [8:0] raddr;
 
   assign rdata = mem[raddr];
+
+  // // ================= 修正后的 DPI 函数 (兼容 312 位签名) =================
+  // export "DPI-C" function simutil_set_mem;
+  // export "DPI-C" function simutil_get_mem;
+
+  // // 输入改为 [311:0] 以匹配 prim_util_memload 的签名
+  // function int simutil_set_mem(input int index, input bit [311:0] val);
+  //   if (index >= 0 && index < 512) begin
+  //     mem[index] = val[127:0]; // 只取低 128 位写入 SRAM
+  //     return 1; 
+  //   end
+  //   return 0; 
+  // endfunction
+
+  // // 输出改为 [311:0] 以匹配 prim_util_memload 的签名
+  // function int simutil_get_mem(input int index, output bit [311:0] val);
+  //   if (index >= 0 && index < 512) begin
+  //     val = {184'b0, mem[index]}; // 高位补 0，返回 312 位
+  //     return 1; 
+  //   end
+  //   val = '0;
+  //   return 0; 
+  // endfunction
+  // // ====================================================================
 
 `ifndef SYNTHESIS
   task randomMemoryAll;

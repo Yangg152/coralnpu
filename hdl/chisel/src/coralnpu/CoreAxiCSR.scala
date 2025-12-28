@@ -46,7 +46,7 @@ class CoreCSR(p: Parameters) extends Module {
   // Bit 0 - Reset (Active High)
   // Bit 1 - Clock Gate (Active High)
   // By default, be in reset and with the clock gated.
-  val resetReg = RegInit(3.U(p.fetchAddrBits.W))
+  val resetReg = RegInit(0.U(p.fetchAddrBits.W))
   val pcStartReg = RegInit(0.U(p.fetchAddrBits.W))
   val statusReg = RegInit(0.U(p.fetchAddrBits.W))
 

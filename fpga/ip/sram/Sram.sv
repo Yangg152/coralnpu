@@ -11,7 +11,7 @@ module Sram
      output logic [Width - 1 : 0] rdata_o,
      output logic rvalid_o);
 
-  logic [Width - 1 : 0] mem[Depth - 1 : 0];
+  logic [Width - 1 : 0] mem[Depth - 1 : 0]/* verilator public */;
   logic [$clog2(Depth) - 1 : 0] raddr;
 
   assign rdata_o = mem[raddr];

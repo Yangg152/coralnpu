@@ -255,8 +255,19 @@ module coralnpu_soc
                      .wr_collision_i(1'b0),
                      .write_pending_i(1'b0));
 
+  // Sram #(.Width(32),
+  //        .Depth(1048576))
+  //     i_sram(.clk_i(clk_i),
+  //            .req_i(sram_req),
+  //            .we_i(sram_we),
+  //            .addr_i(sram_addr),
+  //            .wdata_i(sram_wdata),
+  //            .wmask_i(sram_wmask),
+  //            .rdata_o(sram_rdata),
+  //            .rvalid_o(sram_rvalid));
+  
   Sram #(.Width(32),
-         .Depth(1048576))
+         .Depth(131072))
       i_sram(.clk_i(clk_i),
              .req_i(sram_req),
              .we_i(sram_we),

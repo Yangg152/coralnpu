@@ -75,4 +75,4 @@ targets:
       - FPGA_XILINX=true
     tools:
       vivado:
-        part: "xcvu13p-fhga2104-2-e"
+        part: "xczu9eg-ffvb1156-1-e"
