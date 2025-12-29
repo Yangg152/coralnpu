@@ -6,8 +6,8 @@
 // 2. output Out is 16-bit
 // 3. support unsigned/signed inputs, but needs *is_signed
 //    flag to identify
-
-
+(* keep_hierarchy = "yes" *)
+(* use_dsp = "yes" *)
 module rvv_backend_mul_unit_mul8 (
   out,
   in0, in0_is_signed,
