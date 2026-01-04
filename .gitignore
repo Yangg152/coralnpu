@@ -18,3 +18,5 @@ tests/uvm/vc_hdrs.h
 __pycache__
 #toolchain
 toolchain/build_scripts/
+synth-vivado/
+1*

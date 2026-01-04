@@ -40,8 +40,10 @@ constexpr size_t kTensorArenaSize = 256 * 1024;
 int8_t inference_status = -1;
 char inference_status_message[31]
     __attribute__((section(".data"), aligned(16)));
+// uint8_t tensor_arena[kTensorArenaSize]
+//     __attribute__((section(".extdata"), aligned(16)));
 uint8_t tensor_arena[kTensorArenaSize]
-    __attribute__((section(".extdata"), aligned(16)));
+    __attribute__((section(".data"), aligned(16)));    
 }
 
 int main(int argc, char** argv) {

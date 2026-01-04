@@ -29,6 +29,7 @@ wire [17:0] out_int;
 (* use_dsp = "yes" *)
 assign out_int = {{9{in0_int[8]}},in0_int} * {{9{in1_int[8]}},in1_int};
 
+
 assign out = out_int[0+:16];
 
 endmodule
