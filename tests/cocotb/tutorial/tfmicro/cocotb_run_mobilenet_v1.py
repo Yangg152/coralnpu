@@ -25,7 +25,7 @@ async def core_mini_rvv_mobilenet_v1(dut):
     r = runfiles.Create()
     
     async def show_progress(dut):
-        # 根据你的信号列表，时钟信号名为 io_aclk
+        # 时钟信号名为 io_aclk
         clock_signal = dut.io_aclk 
         
         # 打印一下确认拿到信号了
