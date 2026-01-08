@@ -16,6 +16,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "sw/opt/litert-micro/conv.h" 
 #include "sw/opt/litert-micro/depthwise_conv.h"
 #include "tensorflow/lite/core/c/common.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
@@ -26,6 +27,7 @@
 namespace {
 using MobilenetOpResolver = tflite::MicroMutableOpResolver<2>;
 using coralnpu_v2::opt::litert_micro::Register_DEPTHWISE_CONV_2D;
+using coralnpu_v2::opt::litert_micro::Register_CONV_2D;
 TfLiteStatus RegisterOps(MobilenetOpResolver& op_resolver) {
   TF_LITE_ENSURE_STATUS(op_resolver.AddConv2D());
   TF_LITE_ENSURE_STATUS(
@@ -37,7 +39,11 @@ TfLiteStatus RegisterOps(MobilenetOpResolver& op_resolver) {
 extern "C" {
 // aligned(16)
 constexpr size_t kTensorArenaSize = 256 * 1024;
-int8_t inference_status = -1;
+int8_t inference_status = -1;       // 0 = Success, -1 = Fail
+uint32_t inference_cycles = 0;      // 记录推理消耗的时钟周期数
+int32_t output_class = -1;          // 预测的类别 ID
+int8_t output_score = -128;         // 预测的分数 (int8)
+
 char inference_status_message[31]
     __attribute__((section(".data"), aligned(16)));
 // uint8_t tensor_arena[kTensorArenaSize]
@@ -46,24 +52,75 @@ uint8_t tensor_arena[kTensorArenaSize]
     __attribute__((section(".data"), aligned(16)));    
 }
 
+inline uint32_t read_cycles() {
+  uint32_t cycles;
+  asm volatile("csrr %0, mcycle" : "=r"(cycles));
+  return cycles;
+}
+
 int main(int argc, char** argv) {
   const tflite::Model* model =
       tflite::GetModel(g_mobilenet_v1_025_partial_layers_model_data);
+
+  if (model->version() != TFLITE_SCHEMA_VERSION) {
+     std::strncpy(inference_status_message, "Model schema mismatch", 31);
+     return -1;
+  }
+
+  // 2. 注册算子
   MobilenetOpResolver op_resolver;
-  RegisterOps(op_resolver);
+  if (RegisterOps(op_resolver) != kTfLiteOk) {
+      std::strncpy(inference_status_message, "Op registration failed", 31);
+      return -1;
+  }
+
   std::strncpy(inference_status_message, "Halted after op resolver", 31);
+  
+  // 3. 初始化解释器
   tflite::MicroInterpreter interpreter(model, op_resolver, tensor_arena,
                                        kTensorArenaSize);
-  std::strncpy(inference_status_message, "Halted after Interpreter setup", 31);
+
   if (interpreter.AllocateTensors() != kTfLiteOk) {
-    std::strncpy(inference_status_message, "Error during AllocateTensors", 31);
+    std::strncpy(inference_status_message, "AllocateTensors failed", 31);
     return -1;
   }
+
+  std::strncpy(inference_status_message, "Running Invoke...", 31);
+
+  // === 4. 执行推理并计时 ===
+  uint32_t start_cycles = read_cycles();
+  
   if (interpreter.Invoke() != kTfLiteOk) {
     std::strncpy(inference_status_message, "Error during Invoke", 31);
     return -1;
   }
+  
+  uint32_t end_cycles = read_cycles();
+  inference_cycles = end_cycles - start_cycles; // 结果将被 Python 读取
+
+  // === 5. 解析输出 (ArgMax) ===
+  TfLiteTensor* output = interpreter.output(0);
+  if (output != nullptr) {
+      intmax_t num_elements = 1;
+      for (int i = 0; i < output->dims->size; ++i) {
+          num_elements *= output->dims->data[i];
+      }
+
+      int best_idx = 0;
+      int8_t best_val = -128;
+      
+      // 遍历输出寻找概率最大的类别
+      for (int i = 0; i < num_elements; ++i) {
+          if (output->data.int8[i] > best_val) {
+              best_val = output->data.int8[i];
+              best_idx = i;
+          }
+      }
+      output_class = best_idx;
+      output_score = best_val;
+  }
+
   std::strncpy(inference_status_message, "Invoke successful", 31);
-  inference_status = 0;
+  inference_status = 0; // 成功
   return 0;
 }

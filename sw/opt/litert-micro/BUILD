@@ -27,3 +27,17 @@ cc_library(
         "@tflite_micro//tensorflow/lite/micro:op_resolvers",
     ],
 )
+
+cc_library(
+    name = "conv",
+    srcs = [
+        "accumulator_util.h",
+        "conv.cc",
+    ],
+    hdrs = ["conv.h"],
+    target_compatible_with = ["//platforms/cpu:coralnpu_v2"], # 建议加上硬件约束
+    deps = [
+        "//sw/opt:rvv_opt",
+        "@tflite_micro//tensorflow/lite/micro:op_resolvers",
+    ],
+)

@@ -33,6 +33,7 @@ coralnpu_v2_binary(
     hdrs = ["mobilenet_v1_025_partial_layers.h"],
     linker_script = "@coralnpu_hw//toolchain:coralnpu_tcm_highmem.ld",
     deps = [
+        "//sw/opt/litert-micro:conv",
         "//sw/opt/litert-micro:depthwise_conv",
         "@tflite_micro//tensorflow/lite/micro:micro_framework",
         "@tflite_micro//tensorflow/lite/micro:micro_log",
@@ -131,6 +132,122 @@ cocotb_test_suite(
             "@rules_python//python/runfiles",
         ],
         "data": ["depthwise_conv_test.elf"],
+    },
+    vcs_build_args = VCS_BUILD_ARGS,
+    vcs_data = glob(["**/*.elf"]) + [
+        "//tests/cocotb:coverage_exclude.cfg",
+    ],
+    vcs_defines = VCS_DEFINES,
+    vcs_test_args = VCS_TEST_ARGS,
+    vcs_verilog_sources = ["//hdl/chisel/src/coralnpu:rvv_core_mini_highmem_axi_cc_library_verilog"],
+    verilator_model = "//tests/cocotb:rvv_core_mini_highmem_axi_model",
+)
+
+# 1. 生成新模型的 C++ 数组文件
+# 把 mobilenet_v1_025_128_quant.tflite 下载到了 models/ 目录下
+generate_cc_arrays(
+    name = "mobilenet_v1_025_128_quant_cc",
+    src = "models/mobilenet_v1_025_128_quant.tflite",
+    out = "mobilenet_v1_025_128_quant.cc",
+)
+
+generate_cc_arrays(
+    name = "mobilenet_v1_025_128_quant_h",
+    src = "models/mobilenet_v1_025_128_quant.tflite",
+    out = "mobilenet_v1_025_128_quant.h",
+)
+
+# 2. 定义新的二进制文件目标
+# 使用一个新的 C++ 源文件 run_mobilenet_full.cc
+coralnpu_v2_binary(
+    name = "run_mobilenet_v1_025_128_quant_binary",
+    srcs = [
+        "mobilenet_v1_025_128_quant_cc",
+        "run_mobilenet_full.cc", 
+    ],
+    hdrs = ["mobilenet_v1_025_128_quant.h"],
+    linker_script = "@coralnpu_hw//toolchain:coralnpu_tcm_highmem.ld",
+    deps = [
+        "//sw/opt/litert-micro:conv",
+        "//sw/opt/litert-micro:depthwise_conv",
+        "@tflite_micro//tensorflow/lite/micro:micro_framework",
+        "@tflite_micro//tensorflow/lite/micro:micro_log",
+        "@tflite_micro//tensorflow/lite/micro:micro_profiler",
+        "@tflite_micro//tensorflow/lite/micro:op_resolvers",
+        "@tflite_micro//tensorflow/lite/micro:system_setup",
+    ],
+)
+
+# 3. 更新测试套件
+# 将新的 binary 添加到数据依赖中
+cocotb_test_suite(
+    name = "cocotb_run_mobilenet_full", # 改个名字区分
+    simulators = [
+        "verilator",
+        "vcs",
+    ],
+    testcases = RUN_MOBILENET_TEST,
+    testcases_vname = "RUN_MOBILENET_TEST",
+    tests_kwargs = {
+        "waves": False,
+        "tags" : ["manual"],
+        "hdl_toplevel": "RvvCoreMiniHighmemAxi",
+        "seed": "42",
+        "size": "enormous",
+        "test_module": ["cocotb_run_mobilenet_v1.py"], # 复用 Python 脚本
+        "deps": [
+            "//coralnpu_test_utils:core_mini_axi_sim_interface",
+            "//coralnpu_test_utils:sim_test_fixture",
+            "@rules_python//python/runfiles",
+        ],
+        # 注意这里：改成新的 binary 名字
+        "data": ["run_mobilenet_v1_025_128_quant_binary.elf"], 
+    },
+    vcs_build_args = VCS_BUILD_ARGS,
+    vcs_data = glob(["**/*.elf"]) + ["//tests/cocotb:coverage_exclude.cfg"],
+    vcs_defines = VCS_DEFINES,
+    vcs_test_args = VCS_TEST_ARGS,
+    vcs_verilog_sources = ["//hdl/chisel/src/coralnpu:rvv_core_mini_highmem_axi_cc_library_verilog"],
+    verilator_model = "//tests/cocotb:rvv_core_mini_highmem_axi_model",
+)
+
+# 1. 编译 C++ 测试二进制
+coralnpu_v2_binary(
+    name = "conv_test", # 生成 conv_test.elf
+    srcs = ["conv_test.cc"],
+    linker_script = "@coralnpu_hw//toolchain:coralnpu_tcm_highmem.ld",
+    deps = [
+        "//sw/opt/litert-micro:conv", 
+        "//sw/opt/litert-micro:depthwise_conv", # 借用一下配置
+        "@tflite_micro//tensorflow/lite/kernels/internal:reference_base"
+    ],
+)
+
+# 2. 定义 Python 测试套件
+cocotb_test_suite(
+    name = "cocotb_conv",
+    simulators = [
+        "verilator",
+        "vcs",
+    ],
+    testcases = [
+        "test_conv1x1_32to32",
+        "test_conv1x1_32to64",
+        "test_conv1x1_64to32",
+        "test_conv1x1_odd_channels",
+    ],
+    tests_kwargs = {
+        "waves": False, # 调试时可以设为 True
+        "hdl_toplevel": "RvvCoreMiniHighmemAxi",
+        "size": "enormous",
+        "default_testcase_size": "medium",
+        "test_module": ["cocotb_conv.py"],
+        "deps": [
+            "//coralnpu_test_utils:core_mini_axi_sim_interface",
+            "//coralnpu_test_utils:sim_test_fixture",
+            "@rules_python//python/runfiles",
+        ],
+        "data": ["conv_test.elf"],
     },
     vcs_build_args = VCS_BUILD_ARGS,
     vcs_data = glob(["**/*.elf"]) + [
