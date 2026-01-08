@@ -102,6 +102,55 @@ def convert_to_binary_value(data):
   return cocotb.types.LogicArray.from_bytes(data, byteorder="little")
 
 
+def set_x(handle):
+  handle.value = "X" * len(handle.range)
+
+
+def clear_slave_read_addr(dut):
+  dut.io_axi_slave_read_addr_valid.value = 0
+  set_x(dut.io_axi_slave_read_addr_bits_addr)
+  set_x(dut.io_axi_slave_read_addr_bits_prot)
+  dut.io_axi_slave_read_addr_bits_lock.value = "X"
+  set_x(dut.io_axi_slave_read_addr_bits_cache)
+  set_x(dut.io_axi_slave_read_addr_bits_qos)
+  set_x(dut.io_axi_slave_read_addr_bits_region)
+
+
+def clear_slave_write_addr(dut):
+  dut.io_axi_slave_write_addr_valid.value = 0
+  set_x(dut.io_axi_slave_write_addr_bits_addr)
+  set_x(dut.io_axi_slave_write_addr_bits_id)
+  set_x(dut.io_axi_slave_write_addr_bits_len)
+  set_x(dut.io_axi_slave_write_addr_bits_size)
+  set_x(dut.io_axi_slave_write_addr_bits_burst)
+  set_x(dut.io_axi_slave_write_addr_bits_prot)
+  dut.io_axi_slave_write_addr_bits_lock.value = "X"
+  set_x(dut.io_axi_slave_write_addr_bits_cache)
+  set_x(dut.io_axi_slave_write_addr_bits_qos)
+  set_x(dut.io_axi_slave_write_addr_bits_region)
+
+
+def clear_slave_write_data(dut):
+  dut.io_axi_slave_write_data_valid.value = 0
+  set_x(dut.io_axi_slave_write_data_bits_data)
+  set_x(dut.io_axi_slave_write_data_bits_strb)
+  dut.io_axi_slave_write_data_bits_last.value = "X"
+
+
+def clear_master_read_data(dut):
+  dut.io_axi_master_read_data_valid.value = 0
+  set_x(dut.io_axi_master_read_data_bits_id)
+  set_x(dut.io_axi_master_read_data_bits_data)
+  set_x(dut.io_axi_master_read_data_bits_resp)
+  dut.io_axi_master_read_data_bits_last.value = "X"
+
+
+def clear_master_write_resp(dut):
+  dut.io_axi_master_write_resp_valid.value = 0
+  set_x(dut.io_axi_master_write_resp_bits_id)
+  set_x(dut.io_axi_master_write_resp_bits_resp)
+
+
 class CoreMiniAxiInterface:
   def __init__(self,
                dut,
@@ -114,15 +163,13 @@ class CoreMiniAxiInterface:
     self.dut.io_aclk.value = 0
     self.dut.io_irq.value = 0
     self.dut.io_te.value = 0
-    self.dut.io_axi_slave_read_addr_valid.value = 0
-    self.dut.io_axi_slave_read_addr_bits_addr.value = 0
+    clear_slave_read_addr(self.dut)
     self.dut.io_axi_slave_read_data_ready.value = 0
-    self.dut.io_axi_slave_write_addr_valid.value = 0
-    self.dut.io_axi_slave_write_addr_bits_addr.value = 0
-    self.dut.io_axi_slave_write_data_valid.value = 0
+    clear_slave_write_addr(self.dut)
+    clear_slave_write_data(self.dut)
     self.dut.io_axi_slave_write_resp_ready.value = 0
-    self.dut.io_axi_master_read_data_valid.value = 0
-    self.dut.io_axi_master_write_resp_valid.value = 0
+    clear_master_read_data(self.dut)
+    clear_master_write_resp(self.dut)
     self.clock_ns = clock_ns
     self.clock = Clock(dut.io_aclk, clock_ns, unit="ns")
     self.csr_base_addr = csr_base_addr
@@ -161,16 +208,11 @@ class CoreMiniAxiInterface:
     await self.write_word(self.csr_base_addr + addr, data)
 
   async def slave_awagent(self, timeout=4096):
-    self.dut.io_axi_slave_write_addr_valid.value = 0
-    self.dut.io_axi_slave_write_addr_bits_prot.value   = 2
-    self.dut.io_axi_slave_write_addr_bits_lock.value   = 0
-    self.dut.io_axi_slave_write_addr_bits_cache.value  = 0
-    self.dut.io_axi_slave_write_addr_bits_qos.value    = 0
-    self.dut.io_axi_slave_write_addr_bits_region.value = 0
+    clear_slave_write_addr(self.dut)
     while True:
       while True:
         await RisingEdge(self.dut.io_aclk)
-        self.dut.io_axi_slave_write_addr_valid.value = 0
+        clear_slave_write_addr(self.dut)
         if self.slave_awfifo.qsize():
           break
       awdata = await self.slave_awfifo.get()
@@ -189,11 +231,11 @@ class CoreMiniAxiInterface:
           assert False, "timeout waiting for awready"
 
   async def slave_wagent(self, timeout=4096):
-    self.dut.io_axi_slave_write_data_valid.value = 0
+    clear_slave_write_data(self.dut)
     while True:
       while True:
         await RisingEdge(self.dut.io_aclk)
-        self.dut.io_axi_slave_write_data_valid.value = 0
+        clear_slave_write_data(self.dut)
         if self.slave_wfifo.qsize():
           break
       wdata = await self.slave_wfifo.get()
@@ -223,16 +265,11 @@ class CoreMiniAxiInterface:
         print('X seen in slave_bagent: ' + str(e))
 
   async def slave_aragent(self, timeout=4096):
-    self.dut.io_axi_slave_read_addr_valid.value = 0
-    self.dut.io_axi_slave_read_addr_bits_prot.value   = 2
-    self.dut.io_axi_slave_read_addr_bits_lock.value   = 0
-    self.dut.io_axi_slave_read_addr_bits_cache.value  = 0
-    self.dut.io_axi_slave_read_addr_bits_qos.value    = 0
-    self.dut.io_axi_slave_read_addr_bits_region.value = 0
+    clear_slave_read_addr(self.dut)
     while True:
       while True:
         await RisingEdge(self.dut.io_aclk)
-        self.dut.io_axi_slave_read_addr_valid.value = 0
+        clear_slave_read_addr(self.dut)
         if self.slave_arfifo.qsize():
           break
       ardata = await self.slave_arfifo.get()
@@ -310,12 +347,14 @@ class CoreMiniAxiInterface:
           await self.master_arfifo.put(ardata)
       except Exception as e:
         print('X seen in master_aragent: ' + str(e))
+        raise e
 
   async def master_ragent(self, timeout=4096):
+    clear_master_read_data(self.dut)
     while True:
       while True:
         await RisingEdge(self.dut.io_aclk)
-        self.dut.io_axi_master_read_data_valid.value = 0
+        clear_master_read_data(self.dut)
         if self.master_rfifo.qsize():
           break
       rdata = await self.master_rfifo.get()
@@ -392,10 +431,11 @@ class CoreMiniAxiInterface:
         print('X seen in master_wagent: ' + str(e))
 
   async def master_bagent(self, timeout=4096):
+    clear_master_write_resp(self.dut)
     while True:
       while True:
         await RisingEdge(self.dut.io_aclk)
-        self.dut.io_axi_master_write_resp_valid.value = 0
+        clear_master_write_resp(self.dut)
         if self.master_bfifo.qsize():
           break
       bdata = await self.master_bfifo.get()

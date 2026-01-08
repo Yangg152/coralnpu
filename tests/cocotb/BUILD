@@ -77,7 +77,7 @@ verilator_cocotb_model(
 
 # BEGIN_TESTCASES_FOR_core_mini_axi_sim_cocotb
 CORE_MINI_AXI_SIM_TESTCASES = [
-    ("core_mini_axi_basic_write_read_memory", "medium"),
+    ("core_mini_axi_basic_write_read_memory", "large"),
     "core_mini_axi_run_wfi_in_all_slots",
     "core_mini_axi_slow_bready",
     ("core_mini_axi_write_read_memory_stress_test", "medium"),
@@ -164,7 +164,10 @@ template_rule(
         "vcs",
     ],
     vcs_build_args = VCS_BUILD_ARGS,
-    vcs_data = COCOTB_TEST_BINARY_TARGETS + [":coverage_exclude.cfg"],
+    vcs_data = COCOTB_TEST_BINARY_TARGETS + [
+        ":coverage_exclude.cfg",
+        ":xprop.cfg"
+    ],
     vcs_defines = VCS_DEFINES,
     vcs_test_args = VCS_TEST_ARGS,
 )
@@ -313,7 +316,10 @@ cocotb_test_suite(
         ":math.elf",
         ":noop.elf",
         ":registers.elf",
-    ] + [":coverage_exclude.cfg"],
+    ] + [
+        ":coverage_exclude.cfg",
+        ":xprop.cfg"
+    ],
     vcs_defines = VCS_DEFINES,
     vcs_test_args = VCS_TEST_ARGS,
     vcs_verilog_sources = ["//hdl/chisel/src/coralnpu:core_mini_axi_debug_cc_library_verilog"],
@@ -345,7 +351,10 @@ cocotb_test_suite(
         "size": "medium",
     },
     vcs_build_args = VCS_BUILD_ARGS,
-    vcs_data = ["//tests/cocotb/rvv:rvv_assem_tests"] + [":coverage_exclude.cfg"],
+    vcs_data = ["//tests/cocotb/rvv:rvv_assem_tests"] + [
+        ":coverage_exclude.cfg",
+        ":xprop.cfg"
+    ],
     vcs_defines = VCS_DEFINES,
     vcs_test_args = VCS_TEST_ARGS,
     vcs_verilog_sources = ["//hdl/chisel/src/coralnpu:rvv_core_mini_axi_cc_library_verilog"],
@@ -488,7 +497,10 @@ cocotb_test_suite(
         "size": "enormous",
     },
     vcs_build_args = VCS_BUILD_ARGS,
-    vcs_data = ["//tests/cocotb/rvv/load_store:rvv_load_store_tests"] + [":coverage_exclude.cfg"],
+    vcs_data = ["//tests/cocotb/rvv/load_store:rvv_load_store_tests"] + [
+        ":coverage_exclude.cfg",
+        ":xprop.cfg"
+    ],
     vcs_defines = VCS_DEFINES,
     vcs_test_args = VCS_TEST_ARGS,
     vcs_verilog_sources = ["//hdl/chisel/src/coralnpu:rvv_core_mini_axi_cc_library_verilog"],
@@ -518,7 +530,10 @@ cocotb_test_suite(
         "size": "large",
     },
     vcs_build_args = VCS_BUILD_ARGS,
-    vcs_data = ["//tests/cocotb/rvv/arithmetics:rvv_arith_tests"] + [":coverage_exclude.cfg"],
+    vcs_data = ["//tests/cocotb/rvv/arithmetics:rvv_arith_tests"] + [
+        ":coverage_exclude.cfg",
+        ":xprop.cfg"
+    ],
     vcs_defines = VCS_DEFINES,
     vcs_test_args = VCS_TEST_ARGS,
     vcs_verilog_sources = ["//hdl/chisel/src/coralnpu:rvv_core_mini_axi_cc_library_verilog"],
@@ -560,7 +575,10 @@ cocotb_test_suite(
         "size": "medium",
     },
     vcs_build_args = VCS_BUILD_ARGS,
-    vcs_data = ["//tests/cocotb/rvv/ml_ops:rvv_mlop_tests"] + [":coverage_exclude.cfg"],
+    vcs_data = ["//tests/cocotb/rvv/ml_ops:rvv_mlop_tests"] + [
+        ":coverage_exclude.cfg",
+        ":xprop.cfg"
+    ],
     vcs_defines = VCS_DEFINES,
     vcs_test_args = VCS_TEST_ARGS,
     vcs_verilog_sources = ["//hdl/chisel/src/coralnpu:rvv_core_mini_axi_cc_library_verilog"],

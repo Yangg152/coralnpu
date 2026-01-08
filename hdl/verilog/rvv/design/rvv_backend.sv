@@ -37,6 +37,11 @@ module rvv_backend
     vcsr_valid,
     vector_csr,
     vcsr_ready,
+    
+  `ifdef TB_SUPPORT
+    rd_valid_rob2rt_o,
+    rd_rob2rt_o,
+  `endif
 
     rvv_idle,
 
@@ -80,6 +85,12 @@ module rvv_backend
     output  logic                                     vcsr_valid;
     output  RVVConfigState                            vector_csr;
     input   logic                                     vcsr_ready;
+
+// retire information
+  `ifdef TB_SUPPORT
+    output  logic     [`NUM_RT_UOP-1:0]               rd_valid_rob2rt_o;
+    output  ROB2RT_t  [`NUM_RT_UOP-1:0]               rd_rob2rt_o;
+  `endif
 
 // rvv_backend is not active.(IDLE)
     output  logic                                     rvv_idle;
@@ -993,6 +1004,12 @@ module rvv_backend
         .rt2vrf_wr_valid (wr_valid_rt2vrf),
         .rt2vrf_wr_data  (wr_data_rt2vrf)
     );
+
+  // retire information
+`ifdef TB_SUPPORT
+  assign rd_valid_rob2rt_o = rd_valid_rob2rt & rd_ready_rt2rob;
+  assign rd_rob2rt_o       = rd_rob2rt;
+`endif
 
   // rvv_backend IDLE
   assign rvv_idle = fifo_empty_cq2de&uq_empty&rob_empty;

@@ -36,6 +36,7 @@ RUN ln -snf "/usr/share/zoneinfo/${TZ}" /etc/localtime && \
         python3 \
         python3-pip \
         python3-setuptools \
+        python3-venv \
         srecord \
         sudo \
         tzdata \
@@ -66,4 +67,3 @@ RUN ln -snf "/usr/share/zoneinfo/${TZ}" /etc/localtime && \
 RUN ln -sf /lib/x86_64-linux-gnu/libmpfr.so.6.2.0 /lib/x86_64-linux-gnu/libmpfr.so.4
 USER ${_USERNAME}
 WORKDIR /home/${_USERNAME}/
-RUN git clone https://github.com/google-coral/coralnpu.git
