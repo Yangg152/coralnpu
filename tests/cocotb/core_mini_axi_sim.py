@@ -285,6 +285,26 @@ async def core_mini_axi_exceptions_test(dut):
         assert core_mini_axi.dut.io_fault.value == 0
 
 @cocotb.test()
+async def rvv_exceptions_test(dut):
+  if "Rvv" not in dut._name:
+    dut._log.info("Skipping rvv_exceptions_test on non-RVV core")
+    return
+
+  core_mini_axi = CoreMiniAxiInterface(dut)
+  await core_mini_axi.init()
+  await core_mini_axi.reset()
+  cocotb.start_soon(core_mini_axi.clock.start())
+  r = runfiles.Create()
+
+  elf = r.Rlocation("coralnpu_hw/tests/cocotb/vector_store_fault.elf")
+  with open(elf, "rb") as f:
+    await core_mini_axi.reset()
+    entry_point = await core_mini_axi.load_elf(f)
+    await core_mini_axi.execute_from(entry_point)
+    await core_mini_axi.wait_for_halted(timeout_cycles=50000)
+    assert core_mini_axi.dut.io_fault.value == 0
+
+@cocotb.test()
 async def core_mini_axi_coralnpu_isa_test(dut):
   core_mini_axi = CoreMiniAxiInterface(dut)
   await core_mini_axi.init()

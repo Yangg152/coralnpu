@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("//rules:linker.bzl", "generate_linker_script")
+
 """Rules to build CoralNPU SW objects"""
 
 load("@rules_cc//cc:find_cc_toolchain.bzl", "find_cc_toolchain")
@@ -200,20 +202,23 @@ def coralnpu_v2_binary(
         srcs,
         tags = [],
         semihosting = False,
-        linker_script = "@coralnpu_hw//toolchain:coralnpu_tcm.ld",
+        itcm_size_kbytes = 8,
+        dtcm_size_kbytes = 32,
         word_size = 32,
+        linker_script = None,
         **kwargs):
     """A helper macro for generating binary artifacts for the CoralNPU V2 core.
 
     This macro uses the coralnpu_v2 toolchain, libgloss-htif,
-    and coralnpu linker script to build coralnpu binaries.
+    and a generated coralnpu linker script to build coralnpu binaries.
 
     Args:
       name: The name of this rule.
       srcs: The c source files.
       tags: build tags.
       semihosting: Enable htif-style semihosting
-      linker_script: Linker script to construct the final binary.
+      itcm_size_kbytes: Size of ITCM in KBytes.
+      dtcm_size_kbytes: Size of DTCM in KBytes.
       **kwargs: Additional arguments forward to cc_binary.
     Emits rules:
       filegroup              named: <name>.bin
@@ -225,6 +230,27 @@ def coralnpu_v2_binary(
     deps = kwargs.pop("deps", [])
     if not semihosting:
         deps.append("//toolchain/crt")
+
+# See cache_size_param/hw/coralnpu/toolchain/BUILD.bazel for default linker script.
+    if linker_script == None:
+        _DEFAULT_ITCM_SIZE_KBYTES = 8
+        _DEFAULT_DTCM_SIZE_KBYTES = 32
+
+        linker_script_suffix = ""
+        if itcm_size_kbytes != _DEFAULT_ITCM_SIZE_KBYTES or dtcm_size_kbytes != _DEFAULT_DTCM_SIZE_KBYTES:
+            linker_script_suffix = "_ITCM%dKB_DTCM%dKB" % (itcm_size_kbytes, dtcm_size_kbytes)
+
+        linker_script_name = name + linker_script_suffix + "_linker_script"
+        linker_script_output_file = name + linker_script_suffix + ".ld"
+
+        generate_linker_script(
+            name = linker_script_name,
+            src = "@coralnpu_hw//toolchain:coralnpu_tcm.ld.tpl",
+            out = linker_script_output_file,
+            itcm_size_kbytes = itcm_size_kbytes,
+            dtcm_size_kbytes = dtcm_size_kbytes,
+        )
+        linker_script = ":" + linker_script_output_file
 
     _coralnpu_v2_binary(
         name = name,

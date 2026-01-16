@@ -84,6 +84,24 @@ struct DebugIO {
   sc_signal<sc_lv<32>> float_writeData_0_bits_data;
   sc_signal<sc_lv<32>> float_writeData_1_bits_data;
 #endif
+  // Retirement Buffer signals
+#define DECL_RB_SIGNALS(x) \
+  sc_signal<sc_logic> rb_inst_##x##_valid; \
+  sc_signal<sc_lv<32>> rb_inst_##x##_bits_pc; \
+  sc_signal<sc_lv<32>> rb_inst_##x##_bits_inst; \
+  sc_signal<sc_lv<KP_retirementBufferIdxWidth>> rb_inst_##x##_bits_idx; \
+  sc_signal<sc_lv<32>> rb_inst_##x##_bits_data; \
+  sc_signal<sc_logic> rb_inst_##x##_bits_trap;
+
+  DECL_RB_SIGNALS(0)
+  DECL_RB_SIGNALS(1)
+  DECL_RB_SIGNALS(2)
+  DECL_RB_SIGNALS(3)
+  DECL_RB_SIGNALS(4)
+  DECL_RB_SIGNALS(5)
+  DECL_RB_SIGNALS(6)
+  DECL_RB_SIGNALS(7)
+#undef DECL_RB_SIGNALS
 };
 
 struct DebugModuleIO {

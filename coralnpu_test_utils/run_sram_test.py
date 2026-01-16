@@ -17,7 +17,7 @@ import argparse
 import os
 import random
 import numpy as np
-from ftdi_spi_master import FtdiSpiMaster
+from coralnpu_hw.coralnpu_test_utils.ftdi_spi_master import FtdiSpiMaster
 
 class SramTestRunner:
     """Runs a SRAM test on the CoralNPU hardware."""
@@ -25,7 +25,7 @@ class SramTestRunner:
     SRAM_ADDR = 0x20000000
     SRAM_SIZE_BYTES = 16 * 1024  # Test a 16kB block
 
-    def __init__(self, usb_serial, ftdi_port=1):
+    def __init__(self, usb_serial, ftdi_port=1, csr_base_addr=0x30000):
         """
         Initializes the SramTestRunner.
 
@@ -33,7 +33,7 @@ class SramTestRunner:
             usb_serial: USB serial number of the FTDI device.
             ftdi_port: Port number of the FTDI device.
         """
-        self.spi_master = FtdiSpiMaster(usb_serial, ftdi_port)
+        self.spi_master = FtdiSpiMaster(usb_serial, ftdi_port, csr_base_addr)
 
     def _generate_data(self):
         """Generates random data to fill the SRAM."""
@@ -78,10 +78,11 @@ def main():
     parser = argparse.ArgumentParser(description="Run SRAM test on CoralNPU.")
     parser.add_argument("--usb-serial", required=True, help="USB serial number of the FTDI device.")
     parser.add_argument("--ftdi-port", type=int, default=1, help="Port number of the FTDI device.")
+    parser.add_argument("--csr-base-addr", type=lambda x: int(x, 0), default=0x30000, help="Base address for CSR registers (can be hex, default: 0x30000).")
     args = parser.parse_args()
 
     try:
-        runner = SramTestRunner(args.usb_serial, args.ftdi_port)
+        runner = SramTestRunner(args.usb_serial, args.ftdi_port, args.csr_base_addr)
         runner.run_test()
     except (ValueError, FileNotFoundError) as e:
         print(f"Error: {e}")

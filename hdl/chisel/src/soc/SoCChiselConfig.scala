@@ -1,6 +1,6 @@
 package coralnpu.soc
 
-import coralnpu.{MemoryRegion, MemoryRegions}
+import coralnpu.{MemoryRegion, MemoryRegions, Parameters, MemorySize}
 
 // --- External Port Definitions ---
 
@@ -42,8 +42,7 @@ case class CoreTlulParameters(
   enableFetchL0: Boolean,
   fetchDataBits: Int,
   enableFloat: Boolean,
-  memoryRegions: Seq[MemoryRegion],
-  tcmHighmem: Boolean,
+  memoryRegions: Seq[MemoryRegion]
 ) extends ModuleParameters
 
 /** Parameters for the Spi2TLUL module. */
@@ -76,13 +75,25 @@ case class ChiselModuleConfig(
  * The single source of truth for the entire Chisel-based portion of the SoC.
  */
 object SoCChiselConfig {
-  def apply(enableHighmem: Boolean = false): SoCChiselConfig = {
-    new SoCChiselConfig(enableHighmem)
+  def apply(itcmSize: MemorySize = MemorySize.fromKBytes(Parameters.itcmSizeKBytesDefault), dtcmSize: MemorySize = MemorySize.fromKBytes(Parameters.dtcmSizeKBytesDefault)): SoCChiselConfig = {
+    new SoCChiselConfig(itcmSize, dtcmSize)
   }
 }
 
-class SoCChiselConfig(enableHighmem: Boolean) {
-  val crossbar = CrossbarConfig(enableHighmem)
+class SoCChiselConfig(itcmSize: MemorySize, dtcmSize: MemorySize) {
+  // --- Memory Map ---
+  val memoryRegions = {
+    val defaultItcmSize = MemorySize.fromKBytes(Parameters.itcmSizeKBytesDefault)
+    val defaultDtcmSize = MemorySize.fromKBytes(Parameters.dtcmSizeKBytesDefault)
+
+    if (itcmSize == defaultItcmSize && dtcmSize == defaultDtcmSize) {
+      MemoryRegions.default
+    } else {
+      MemoryRegions.highmem(itcmSize.kBytes, dtcmSize.kBytes)
+    }
+  }
+
+  val crossbar = CrossbarConfig(itcmSize, dtcmSize)
   val modules = Seq(
     ChiselModuleConfig(
       name = "rvv_core",
@@ -93,12 +104,7 @@ class SoCChiselConfig(enableHighmem: Boolean) {
         enableFetchL0 = false,
         fetchDataBits = 128,
         enableFloat = true,
-        memoryRegions = if (enableHighmem) {
-          MemoryRegions.tcmHighmem
-        } else {
-          MemoryRegions.default
-        },
-        tcmHighmem = enableHighmem,
+        memoryRegions = memoryRegions
       ),
       hostConnections = Map("io.tl_host" -> "coralnpu_core"),
       deviceConnections = Map("io.tl_device" -> "coralnpu_device"),

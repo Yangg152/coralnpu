@@ -117,10 +117,31 @@ verilator_cocotb_model(
     verilog_source = ":coralnpu_chisel_subsystem_testharness_cc_library_emit_verilog",
 )
 
+# Highmem defined to be 1024kB itcm and 1024kB dtcm at this time.
+# CSR base address set to 0x200000 for highmem or any non default itcm size
+# (default itcm size is itcm 8 / dtcm 32)
 chisel_cc_library(
     name = "coralnpu_chisel_subsystem_highmem_cc_library",
     chisel_lib = ":coralnpu_chisel_subsystem_lib",
     emit_class = "coralnpu.soc.CoralNPUChiselSubsystemEmitter",
     module_name = "CoralNPUChiselSubsystemHighmem",
-    gen_flags = ["--enableHighmem"],
+    gen_flags = [
+        "--itcmSizeKBytes",
+        "1024",
+        "--dtcmSizeKBytes",
+        "1024",
+    ],
+)
+
+chisel_cc_library(
+    name = "coralnpu_chisel_subsystem_itcm512kb_dtcm512kb_cc_library",
+    chisel_lib = ":coralnpu_chisel_subsystem_lib",
+    emit_class = "coralnpu.soc.CoralNPUChiselSubsystemEmitter",
+    module_name = "CoralNPUChiselSubsystem_ITCM512KB_DTCM512KB",
+    gen_flags = [
+        "--itcmSizeKBytes",
+        "512",
+        "--dtcmSizeKBytes",
+        "512",
+    ],
 )

@@ -24,8 +24,9 @@ from coralnpu_test_utils.spi_constants import SpiRegAddress, SpiCommand, TlStatu
 class FtdiSpiMaster:
     """A class to manage SPI communication using an FTDI device."""
 
-    def __init__(self, usb_serial, ftdi_port=1):
+    def __init__(self, usb_serial, ftdi_port=1, csr_base_addr=0x30000):
         """Initializes the FTDI SPI master."""
+        self.csr_base_addr = csr_base_addr
         # pyftdi uses ftdi://<vendor>:<product>/<serial> or ftdi://<vendor>:<product>:<index>
         url = f'ftdi://::{usb_serial}/{ftdi_port}'
         print(f"Opening FTDI device at: {url}")
@@ -352,13 +353,13 @@ class FtdiSpiMaster:
     def set_entry_point(self, entry_point):
         """Sets the core's entry point address."""
         print(f"Setting entry point to 0x{entry_point:x}")
-        self.write_word(0x30004, entry_point)
+        self.write_word(self.csr_base_addr + 4, entry_point)
 
     def start_core(self):
         """Releases the core from reset to begin execution."""
         print("Starting core...")
-        self.write_word(0x30000, 1)
-        self.write_word(0x30000, 0)
+        self.write_word(self.csr_base_addr, 1)
+        self.write_word(self.csr_base_addr, 0)
 
     def read_word(self, address):
         """Reads a single 32-bit word from a given address."""
@@ -475,7 +476,7 @@ class FtdiSpiMaster:
     def poll_for_halt(self, timeout=10.0):
         """Polls the halt status address until the core is halted."""
         print("Polling for halt...")
-        halt_addr = 0x30008
+        halt_addr = self.csr_base_addr + 8
         start_time = time.time()
         while time.time() - start_time < timeout:
             value = self.read_word(halt_addr)
@@ -856,6 +857,7 @@ def main():
     parser = argparse.ArgumentParser(description="FTDI SPI Master Utility")
     parser.add_argument("--usb-serial", required=True, help="USB serial number of the FTDI device.")
     parser.add_argument("--ftdi-port", type=int, default=1, help="Port number of the FTDI device.")
+    parser.add_argument("--csr-base-addr", type=lambda x: int(x, 0), default=0x30000, help="Base address for CSR registers (can be hex, default: 0x30000).")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -895,7 +897,7 @@ def main():
     args = parser.parse_args()
 
     try:
-        spi_master = FtdiSpiMaster(args.usb_serial, args.ftdi_port)
+        spi_master = FtdiSpiMaster(args.usb_serial, args.ftdi_port, args.csr_base_addr)
         spi_master.idle_clocking(20)
         # time.sleep(1)
 

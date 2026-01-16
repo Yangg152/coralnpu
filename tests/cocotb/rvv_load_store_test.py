@@ -395,7 +395,8 @@ async def load_unit_masked(dut):
 
     rng = np.random.default_rng()
     for use_axi, (dtype, lmul, vl) in tqdm.tqdm(all_cases, total=total_loops):
-        vtype = construct_vtype(1, 1, DTYPE_TO_SEW[dtype], lmul)
+        # mask and tail undisturbed for this test.
+        vtype = construct_vtype(0, 0, DTYPE_TO_SEW[dtype], lmul)
         mask_bytes = (vl + 7) // 8
         mask_data = rng.integers(0, 256, mask_bytes, dtype=np.uint8)
         min_value = np.iinfo(dtype).min

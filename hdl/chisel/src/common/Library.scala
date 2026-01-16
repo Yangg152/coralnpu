@@ -59,17 +59,21 @@ object MakeValid {
     )
   }
 
+  def apply[T <: Data](valid: Bool, bits: T, bitsWhenInvalid: T): ValidIO[T] = {
+    // Allowing a different value when invalid makes it easier to either keep
+    // the bits (in a reg) or zero them.
+    apply(valid, Mux(valid, bits, bitsWhenInvalid))
+  }
+
   def apply[T <: Data](bits: T): ValidIO[T] = {
     apply(true.B, bits)
   }
 }
 
 object MakeInvalid {
-  def apply[T <: Data](gen: T): ValidIO[T] = MakeWireBundle[ValidIO[T]](
-    Valid(gen),
-    _.valid -> false.B,
-    _.bits -> 0.U.asTypeOf(gen),
-  )
+  def apply[T <: Data](gen: T): ValidIO[T] = {
+    MakeValid[T](false.B, 0.U.asTypeOf(gen))
+  }
 }
 
 object MakeDecoupled {
@@ -86,11 +90,9 @@ object MakeDecoupled {
 // Gate the bits of an interface based on it's validity bit. This prevents
 // invalid data from propagating down stream, thus reducing dynamic power
 object ForceZero {
-  def apply[T <: Data](input: ValidIO[T]): ValidIO[T] = MakeWireBundle[ValidIO[T]](
-    chiselTypeOf(input),
-    _.valid -> input.valid,
-    _.bits  -> Mux(input.valid, input.bits, 0.U.asTypeOf(input).bits),
-  )
+  def apply[T <: Data](input: ValidIO[T]): ValidIO[T] = {
+    MakeValid[T](input.valid, input.bits, 0.U.asTypeOf(input.bits))
+  }
 }
 
 object Clz {

@@ -78,7 +78,7 @@ template_rule(
     },
     env = {
         "PATH": "$$(dirname $(execpath //toolchain/wrappers:gcc)):$$PATH",
-        "RISCV_ENV_DIR": "$$(realpath $$(dirname $(location @coralnpu_hw//third_party/riscv-tests:env/p/riscv_test.h)))/../",
+        "RISCV_ENV_DIR": "$$(realpath $$(dirname $$(dirname $$(echo $(locations :shadow_riscv_env) | cut -d ' ' -f 1))))",
     },
     lib_source = ":all_srcs",
     targets = ["isa"],
@@ -90,8 +90,37 @@ template_rule(
     ],
     data = [
         ":all_srcs",
-        ":env/p/riscv_test.h",
+        ":shadow_riscv_env",
     ],
+)
+
+genrule(
+    name = "shadow_riscv_env",
+    srcs = [
+        "env/p/riscv_test.h",
+        "env/v/entry.S",
+        "env/v/riscv_test.h",
+        "env/v/vm.c",
+        "//toolchain:coralnpu_tcm.ld",
+    ],
+    outs = [
+        "env_shadow/p/riscv_test.h",
+        "env_shadow/v/entry.S",
+        "env_shadow/v/riscv_test.h",
+        "env_shadow/v/vm.c",
+        "env_shadow/p/link.ld",
+        "env_shadow/v/link.ld",
+    ],
+    cmd = """
+        mkdir -p $(RULEDIR)/env_shadow/p
+        mkdir -p $(RULEDIR)/env_shadow/v
+        cp $(location env/p/riscv_test.h) $(RULEDIR)/env_shadow/p/
+        cp $(location env/v/entry.S) $(RULEDIR)/env_shadow/v/
+        cp $(location env/v/riscv_test.h) $(RULEDIR)/env_shadow/v/
+        cp $(location env/v/vm.c) $(RULEDIR)/env_shadow/v/
+        cp $(location //toolchain:coralnpu_tcm.ld) $(RULEDIR)/env_shadow/p/link.ld
+        cp $(location //toolchain:coralnpu_tcm.ld) $(RULEDIR)/env_shadow/v/link.ld
+    """,
 )
 
 filegroup(

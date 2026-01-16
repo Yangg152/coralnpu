@@ -80,8 +80,14 @@ def coralnpu_repos2():
         build_file = "@pybind11_bazel//:pybind11.BUILD",
         strip_prefix = "pybind11-3.0.1",
         urls = ["https://github.com/pybind/pybind11/archive/v3.0.1.zip"],
+        sha256 = "20fb420fe163d0657a262a8decb619b7c3101ea91db35f1a7227e67c426d4c7e",
     )
-
+    http_archive(
+        name = "pybind11_abseil",
+        strip_prefix = "pybind11_abseil-54b34dd0e8afb8a4febb9508c69410e708b43515",
+        urls = ["https://github.com/pybind/pybind11_abseil/archive/54b34dd0e8afb8a4febb9508c69410e708b43515.tar.gz"],
+        sha256 = "26328a74f367208ae8d490dc640030111df4ba0869619c6445bb4a1c5964e2a7",
+    )
     http_archive(
         name = "rules_hdl",
         sha256 = "1b560fe7d4100486784d6f2329e82a63dd37301e185ba77d0fd69b3ecc299649",
@@ -249,4 +255,19 @@ def tflite_repos():
         sha256 = "bacabfe758676fdc19e4bea7c4a3ac99c7e7378d259a9f1054d341c6a6b44ff6",
         strip_prefix = "bazel-compile-commands-extractor-1266d6a25314d165ca78d0061d3399e909b7920e",
         url = "https://github.com/hedronvision/bazel-compile-commands-extractor/archive/1266d6a25314d165ca78d0061d3399e909b7920e.tar.gz",
+    )
+
+def mpact_repos():
+    http_archive(
+        name = "com_google_mpact-riscv",
+        sha256 = "01dac9ff9e7ca6a2666bf3c881f12cb146298925658e75fa351cddf06633fb0a",
+        strip_prefix = "mpact-riscv-336067a7ee0a91c2c180b35f3423d664d9045cc2",
+        url = "https://github.com/google/mpact-riscv/archive/336067a7ee0a91c2c180b35f3423d664d9045cc2.tar.gz",
+    )
+
+    http_archive(
+        name = "coralnpu_mpact",
+        urls = ["https://github.com/google-coral/coralnpu-mpact/archive/d1a44cf4eb33640d624bb9373ae0637735818e38.tar.gz"],
+        sha256 = "b99ad59ae8712d4d87d61a02aa40e456b87ae0e664f2b47b7718ae1a6b9c9671",
+        strip_prefix = "coralnpu-mpact-d1a44cf4eb33640d624bb9373ae0637735818e38",
     )

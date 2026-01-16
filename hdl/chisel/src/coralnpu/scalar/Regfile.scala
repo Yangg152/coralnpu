@@ -81,8 +81,6 @@ class Regfile(p: Parameters) extends Module {
       val regd = Output(UInt(32.W))
       val comb = Output(UInt(32.W))
     }
-
-    val rfwriteCount = Output(UInt(6.W))
   })
 
 
@@ -160,8 +158,6 @@ class Regfile(p: Parameters) extends Module {
       io.writeData(x).valid &&
       io.writeData(x).bits.addr === 0.U &&
       !io.writeMask(x).valid)
-
-  io.rfwriteCount := PopCount(writeValid) - writeValid(0) + PopCount(x0)
 
   // ***************************************************************************
   // Read ports with write forwarding.

@@ -40,18 +40,24 @@ def contains(addr: UInt): Bool = {
 
 object MemoryRegions {
   val default = Seq(
-    new MemoryRegion(0x00000, 0x2000, MemoryRegionType.IMEM), // ITCM
-    new MemoryRegion(0x10000, 0x8000, MemoryRegionType.DMEM), // DTCM
-    new MemoryRegion(0x30000, 0x1000, MemoryRegionType.Peripheral), // CSR
+    new MemoryRegion(0x0000000, 0x00002000, MemoryRegionType.IMEM), // ITCM
+    new MemoryRegion(0x0010000, 0x00008000, MemoryRegionType.DMEM), // DTCM
+    new MemoryRegion(0x0030000, 0x00001000, MemoryRegionType.Peripheral), // CSR
   )
-  val tcmHighmem = Seq(
-    new MemoryRegion(0x000000, 0x100000, MemoryRegionType.IMEM), // ITCM
-    new MemoryRegion(0x100000, 0x100000, MemoryRegionType.DMEM), // DTCM
-    new MemoryRegion(0x200000, 0x1000, MemoryRegionType.Peripheral), // CSR
+  def highmem(itcmSizeKBytes: Int, dtcmSizeKBytes: Int) = Seq(
+    // The DTCM and CSR base addresses are deliberately offset in `highmem`
+    // to allow for varying size up to 1MB without affecting existing memory base addresses
+    new MemoryRegion(0x00000000, itcmSizeKBytes * 1024, MemoryRegionType.IMEM), // ITCM
+    new MemoryRegion(0x00100000, dtcmSizeKBytes * 1024, MemoryRegionType.DMEM), // DTCM
+    new MemoryRegion(0x00200000, 0x00001000, MemoryRegionType.Peripheral), // CSR
   )
 }
 
 object Parameters {
+  val itcmSizeKBytesDefault = 8     // default itcm size for current IP design
+  val dtcmSizeKBytesDefault = 32    // default dtcm size for current IP design
+  val itcmSizeKBytesHighmem = 1024
+  val dtcmSizeKBytesHighmem = 1024
   def apply(): Parameters = {
     return new Parameters()
   }
@@ -118,7 +124,8 @@ class Parameters(var m: Seq[MemoryRegion] = Seq(), val hartId: Int = 0) {
   def useDebugModule: Boolean = { enableDebug }
 
   // TCM Size Configuration
-  var tcmHighmem = false
+  var itcmSizeKBytes = Parameters.itcmSizeKBytesDefault
+  var dtcmSizeKBytes = Parameters.dtcmSizeKBytesDefault
 
   // [External] Core AXI interface.
   val axiSysIdBits = 7

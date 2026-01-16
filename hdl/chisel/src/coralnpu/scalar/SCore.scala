@@ -58,23 +58,29 @@ class SCore(p: Parameters) extends Module {
   val csr = Csr(p)
   val dispatch = Module(new DispatchV2(p))
 
-  val retirement_buffer = Option.when(p.useRetirementBuffer)(Module(new RetirementBuffer(p)))
-  if (p.useRetirementBuffer) {
-    retirement_buffer.get.io.inst := dispatch.io.inst
-    retirement_buffer.get.io.writeAddrScalar := dispatch.io.rdMark
-    (0 until p.instructionLanes + 2).foreach(i => {
-      retirement_buffer.get.io.writeDataScalar(i) := regfile.io.writeData(i)
+  val lsu = Lsu(p)
+  val fault_manager = Module(new FaultManager(p))
+  val retirement_buffer = Module(new RetirementBuffer(p, mini = !p.useRetirementBuffer))
+  val rob_io = retirement_buffer.io
+
+  rob_io.inst := dispatch.io.inst
+  rob_io.writeAddrScalar := dispatch.io.rdMark
+  (0 until p.instructionLanes + 2).foreach(i => {
+    rob_io.writeDataScalar(i) := regfile.io.writeData(i)
+  })
+  dispatch.io.retirement_buffer_nSpace := rob_io.nSpace
+  dispatch.io.retirement_buffer_empty := rob_io.empty
+  dispatch.io.retirement_buffer_trap_pending := rob_io.trapPending
+  if (p.enableRvv) {
+    rob_io.writeAddrVector.get := dispatch.io.rvvRdMark.get
+    (0 until p.instructionLanes).foreach(i => {
+      rob_io.writeDataVector.get(i).valid := io.rvvcore.get.rd_rob2rt_o(i).w_valid
+      rob_io.writeDataVector.get(i).bits.addr := io.rvvcore.get.rd_rob2rt_o(i).w_index
+      rob_io.writeDataVector.get(i).bits.data := io.rvvcore.get.rd_rob2rt_o(i).w_data
     })
-    dispatch.io.retirement_buffer_nSpace.get := retirement_buffer.get.io.nSpace
-    if (p.enableRvv) {
-      retirement_buffer.get.io.writeAddrVector.get := dispatch.io.rvvRdMark.get
-      (0 until p.instructionLanes).foreach(i => {
-        retirement_buffer.get.io.writeDataVector.get(i).valid := io.rvvcore.get.rd_rob2rt_o(i).w_valid
-        retirement_buffer.get.io.writeDataVector.get(i).bits.addr := io.rvvcore.get.rd_rob2rt_o(i).w_index
-        retirement_buffer.get.io.writeDataVector.get(i).bits.data := io.rvvcore.get.rd_rob2rt_o(i).w_data
-      })
-    }
   }
+  rob_io.fault := fault_manager.io.out
+  rob_io.storeComplete := lsu.io.storeComplete
 
   if (p.useDebugModule) {
     dispatch.io.single_step.get := csr.io.dm.get.single_step || csr.io.dm.get.dcsr_step
@@ -83,7 +89,6 @@ class SCore(p: Parameters) extends Module {
 
   val alu = Seq.fill(p.instructionLanes)(Alu(p))
   val bru = (0 until p.instructionLanes).map(x => Seq(Bru(p, x == 0))).reduce(_ ++ _)
-  val lsu = Lsu(p)
   val mlu = Mlu(p)
   val dvu = Dvu(p)
 
@@ -128,7 +133,6 @@ class SCore(p: Parameters) extends Module {
   dispatch.io.interlock := bru(0).io.interlock.get || lsu.io.flush.valid
 
   // Connect fault signaling to FaultManager.
-  val fault_manager = Module(new FaultManager(p))
   for (i <- 0 until p.instructionLanes) {
     fault_manager.io.in.fault(i).csr := dispatch.io.csrFault(i)
     fault_manager.io.in.fault(i).jal := dispatch.io.jalFault(i)
@@ -153,10 +157,6 @@ class SCore(p: Parameters) extends Module {
     fault_manager.io.in.rvv_fault.get.bits.decode := false.B
   }
   bru(0).io.fault_manager.get := fault_manager.io.out
-  if (p.useRetirementBuffer) {
-    retirement_buffer.get.io.fault := fault_manager.io.out
-    retirement_buffer.get.io.storeComplete := lsu.io.storeComplete
-  }
 
   // ---------------------------------------------------------------------------
   // ALU
@@ -179,9 +179,7 @@ class SCore(p: Parameters) extends Module {
   bru(0).io.csr.get <> csr.io.bru
 
   // Instruction counters
-  csr.io.counters.rfwriteCount := regfile.io.rfwriteCount
-  csr.io.counters.storeCount := lsu.io.storeCount
-  csr.io.counters.branchCount := bru(0).io.taken.valid
+  csr.io.counters.nRetired := rob_io.nRetired
 
   // ---------------------------------------------------------------------------
   // Control Status Unit
@@ -363,14 +361,12 @@ class SCore(p: Parameters) extends Module {
     floatCore.get.io.lsu_rd.bits.addr := lsu.io.rd_flt.bits.addr
     floatCore.get.io.lsu_rd.bits.data := lsu.io.rd_flt.bits.data
 
-    if (p.useRetirementBuffer) {
-      retirement_buffer.get.io.writeAddrFloat.get := dispatch.io.rdMark_flt.get
-      (0 until 2).foreach(i => {
-        retirement_buffer.get.io.writeDataFloat.get(i).valid := fRegfile.get.io.write_ports(i).valid
-        retirement_buffer.get.io.writeDataFloat.get(i).bits.addr := fRegfile.get.io.write_ports(i).addr
-        retirement_buffer.get.io.writeDataFloat.get(i).bits.data := fRegfile.get.io.write_ports(i).data.asWord
-      })
-    }
+    rob_io.writeAddrFloat.get := dispatch.io.rdMark_flt.get
+    (0 until 2).foreach(i => {
+      rob_io.writeDataFloat.get(i).valid := fRegfile.get.io.write_ports(i).valid
+      rob_io.writeDataFloat.get(i).bits.addr := fRegfile.get.io.write_ports(i).addr
+      rob_io.writeDataFloat.get(i).bits.data := fRegfile.get.io.write_ports(i).data.asWord
+    })
   }
 
   val mluDvuOffset = p.instructionLanes
@@ -526,11 +522,11 @@ class SCore(p: Parameters) extends Module {
     }
   }
 
+  io.debug.rb := rob_io.debug
   if (p.useRetirementBuffer) {
-    io.debug.rb.get := retirement_buffer.get.io.debug
     val rvvi = Module(new RvviTrace(p))
-    rvvi.io.rb := retirement_buffer.get.io.debug
-    rvvi.io.csr := csr.io.trace.get
+    rvvi.io.rb := rob_io.debug
+    rvvi.io.csr := csr.io.trace
   }
 }
 

@@ -164,7 +164,6 @@ void CoreMiniAxi_tb::Connect() {
   core_->io_debug_float_writeData_0_bits_data(debug_io_.float_writeData_0_bits_data);
   core_->io_debug_float_writeData_1_bits_data(debug_io_.float_writeData_1_bits_data);
 #endif
-#if (KP_useRetirementBuffer == true)
 #define BIND_RB_DEBUG_IO(x) \
   core_->io_debug_rb_inst_##x##_valid(debug_io_.rb_inst_##x##_valid); \
   core_->io_debug_rb_inst_##x##_bits_pc(debug_io_.rb_inst_##x##_bits_pc); \
@@ -174,7 +173,6 @@ void CoreMiniAxi_tb::Connect() {
   core_->io_debug_rb_inst_##x##_bits_trap(debug_io_.rb_inst_##x##_bits_trap);
   REPEAT(BIND_RB_DEBUG_IO, KP_retirementBufferSize);
 #undef BIND_RB_DEBUG_IO
-#endif
 #if (KP_useDebugModule == true)
   core_->io_dm_req_valid(dm_io_.req_valid);
   core_->io_dm_req_ready(dm_io_.req_valid);
@@ -396,7 +394,6 @@ absl::Status CoreMiniAxi_tb::CheckStatusAsync() {
 }
 
 void CoreMiniAxi_tb::TraceInstructions() {
-#if (KP_useRetirementBuffer == true)
 #define TRACE_INSTRUCTION(x) do { \
   uint32_t pc, inst, idx; \
   pc = debug_io_.rb_inst_##x##_bits_pc.read().get_word(0); \
@@ -419,102 +416,6 @@ void CoreMiniAxi_tb::TraceInstructions() {
 } while (0);
 REPEAT(TRACE_INSTRUCTION, KP_retirementBufferSize);
 #undef TRACE_INSTRUCTION
-#else
-  std::vector<bool> instFires = {
-    debug_io_.dispatch_0_instFire.read(),
-    debug_io_.dispatch_1_instFire.read(),
-    debug_io_.dispatch_2_instFire.read(),
-    debug_io_.dispatch_3_instFire.read()
-  };
-  std::vector<uint32_t> instAddrs = {
-    debug_io_.dispatch_0_instAddr.read().get_word(0),
-    debug_io_.dispatch_1_instAddr.read().get_word(0),
-    debug_io_.dispatch_2_instAddr.read().get_word(0),
-    debug_io_.dispatch_3_instAddr.read().get_word(0)
-  };
-  std::vector<uint32_t> instInsts = {
-    debug_io_.dispatch_0_instInst.read().get_word(0),
-    debug_io_.dispatch_1_instInst.read().get_word(0),
-    debug_io_.dispatch_2_instInst.read().get_word(0),
-    debug_io_.dispatch_3_instInst.read().get_word(0)
-  };
-  std::vector<bool> scalarWriteAddrValids = {
-    debug_io_.regfile_writeAddr_0_valid.read(),
-    debug_io_.regfile_writeAddr_1_valid.read(),
-    debug_io_.regfile_writeAddr_2_valid.read(),
-    debug_io_.regfile_writeAddr_3_valid.read()
-  };
-  std::vector<uint32_t> scalarWriteAddrAddrs = {
-    debug_io_.regfile_writeAddr_0_bits.read().get_word(0),
-    debug_io_.regfile_writeAddr_1_bits.read().get_word(0),
-    debug_io_.regfile_writeAddr_2_bits.read().get_word(0),
-    debug_io_.regfile_writeAddr_3_bits.read().get_word(0)
-  };
-  std::vector<bool> floatWriteAddrValids = {
-    debug_io_.float_writeAddr_valid.read()
-  };
-  std::vector<uint32_t> floatWriteAddrAddrs = {
-    debug_io_.float_writeAddr_bits.read().get_word(0)
-  };
-
-  std::vector<bool> writeDataValids = {
-    debug_io_.regfile_writeData_0_valid.read(),
-    debug_io_.regfile_writeData_1_valid.read(),
-    debug_io_.regfile_writeData_2_valid.read(),
-    debug_io_.regfile_writeData_3_valid.read(),
-    debug_io_.regfile_writeData_4_valid.read(),
-    debug_io_.regfile_writeData_5_valid.read(),
-    debug_io_.float_writeData_0_valid.read(),
-    debug_io_.float_writeData_1_valid.read()
-  };
-
-  std::vector<uint32_t> writeDataAddrs = {
-    debug_io_.regfile_writeData_0_bits_addr.read().get_word(0),
-    debug_io_.regfile_writeData_1_bits_addr.read().get_word(0),
-    debug_io_.regfile_writeData_2_bits_addr.read().get_word(0),
-    debug_io_.regfile_writeData_3_bits_addr.read().get_word(0),
-    debug_io_.regfile_writeData_4_bits_addr.read().get_word(0),
-    debug_io_.regfile_writeData_5_bits_addr.read().get_word(0),
-    debug_io_.float_writeData_0_bits_addr.read().get_word(0),
-    debug_io_.float_writeData_1_bits_addr.read().get_word(0)
-  };
-
-  std::vector<uint32_t> writeDataDatas = {
-    debug_io_.regfile_writeData_0_bits_data.read().get_word(0),
-    debug_io_.regfile_writeData_1_bits_data.read().get_word(0),
-    debug_io_.regfile_writeData_2_bits_data.read().get_word(0),
-    debug_io_.regfile_writeData_3_bits_data.read().get_word(0),
-    debug_io_.regfile_writeData_4_bits_data.read().get_word(0),
-    debug_io_.regfile_writeData_5_bits_data.read().get_word(0),
-    debug_io_.float_writeData_0_bits_data.read().get_word(0),
-    debug_io_.float_writeData_1_bits_data.read().get_word(0)
-  };
-
-  std::vector<int> executeRegBases = {
-    InstructionTrace::kScalarBaseReg,
-    InstructionTrace::kScalarBaseReg,
-    InstructionTrace::kScalarBaseReg,
-    InstructionTrace::kScalarBaseReg,
-    InstructionTrace::kScalarBaseReg,
-    InstructionTrace::kScalarBaseReg,
-    InstructionTrace::kFloatBaseReg,
-    InstructionTrace::kFloatBaseReg
-  };
-
-  tracer_.TraceInstruction(
-    instFires,
-    instAddrs,
-    instInsts,
-    scalarWriteAddrValids,
-    scalarWriteAddrAddrs,
-    floatWriteAddrValids,
-    floatWriteAddrAddrs,
-    writeDataValids,
-    writeDataAddrs,
-    writeDataDatas,
-    executeRegBases
-  );
-#endif
 }
 
 void CoreMiniAxi_tb::posedge() {

@@ -106,6 +106,10 @@ failure:
         ebreak
         j    loop
 success:
+        # Commit instruction retirement counters to architectural state.
+        # This is for co-simulation verification purposes.
+        csrr a0, minstret
+        csrr a1, minstreth
         .word 0x08000073 # mpause
 loop:
         j    loop

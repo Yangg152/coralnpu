@@ -56,7 +56,6 @@ class Lsu(p: Parameters) extends Module {
     // RVV config state
     val rvvState = Option.when(p.enableRvv)(Input(Valid(new RvvConfigState(p))))
 
-    val storeCount = Output(UInt(2.W))
     val queueCapacity = Output(UInt(3.W))
     val active = Output(Bool())
     val storeComplete = Output(Valid(UInt(32.W)))
@@ -113,6 +112,10 @@ object LsuOp extends ChiselEnum {
 
   def isFlush(op: LsuOp.Type): Bool = {
     op.isOneOf(LsuOp.FENCEI, LsuOp.FLUSHAT, LsuOp.FLUSHALL)
+  }
+
+  def isScalarLoad(op: LsuOp.Type): Bool = {
+    op.isOneOf(LsuOp.LB, LsuOp.LBU, LsuOp.LH, LsuOp.LHU, LsuOp.LW)
   }
 
   def opSize(op: LsuOp.Type, address: UInt): (UInt, UInt) = {
@@ -812,9 +815,15 @@ object FlushCmd {
 }
 
 class LsuV2(p: Parameters) extends Lsu(p) {
+  class LsuFault(p: Parameters) extends Bundle {
+    val info = new FaultInfo(p)
+    val rd = UInt(5.W)
+    val op = LsuOp()
+    val store = Bool()
+  }
+
   // Tie-offs
   io.vldst := 0.U
-  io.storeCount := 0.U
 
   val opQueue = Module(new CircularBufferMulti(new LsuUOp(p), p.instructionLanes, 4))
   opQueue.io.flush := false.B
@@ -882,7 +891,7 @@ class LsuV2(p: Parameters) extends Lsu(p) {
 
   // ==========================================================================
   // Transaction update
-  val faultReg = RegInit(MakeInvalid(new FaultInfo(p)))
+  val faultReg = RegInit(MakeInvalid(new LsuFault(p)))
 
   // First stage of load update: Update results based on bus read
   val loadUpdatedSlot = slot.loadUpdate(
@@ -957,11 +966,21 @@ class LsuV2(p: Parameters) extends Lsu(p) {
   ibusFault.bits.addr := targetLineAddr
   ibusFault.bits.epc := slot.pc
 
-  io.fault := faultReg
-  faultReg := MuxCase(MakeInvalid(new FaultInfo(p)), Seq(
-      io.ebus.fault.valid -> io.ebus.fault,
-      ibusFault.valid -> ibusFault,
-  ))
+  io.fault.valid := faultReg.valid
+  io.fault.bits := faultReg.bits.info
+  faultReg := {
+    val f = Wire(Valid(new LsuFault(p)))
+    val nextFaultInfo = MuxCase(MakeInvalid(new FaultInfo(p)), Seq(
+        io.ebus.fault.valid -> io.ebus.fault,
+        ibusFault.valid -> ibusFault,
+    ))
+    f.valid := nextFaultInfo.valid
+    f.bits.info := nextFaultInfo.bits
+    f.bits.rd := slot.rd
+    f.bits.op := slot.op
+    f.bits.store := slot.store
+    f
+  }
 
   // Transaction update
   val storeUpdate = Mux(slotFired, wactive, VecInit.fill(16)(false.B))
@@ -977,31 +996,41 @@ class LsuV2(p: Parameters) extends Lsu(p) {
       lsu2RvvFire && io.lsu2rvv.get(0).bits.last
   } else { false.B }
   val storeComplete = scalarStoreComplete || vectorStoreComplete
-  io.storeComplete := Mux(storeComplete, MakeValid(slot.pc), MakeInvalid(UInt(32.W)))
+  io.storeComplete := Mux(storeComplete && !io.ebus.fault.valid, MakeValid(slot.pc), MakeInvalid(UInt(32.W)))
+
 
   // ==========================================================================
   // Writeback update
 
+  val currentOp = Mux(faultReg.valid, faultReg.bits.op, slot.op)
+  val currentStore = Mux(faultReg.valid, faultReg.bits.store, slot.store)
+
   // Scalar writeback
   // Write back on error. io.fault.valid will mask
-  io.rd.valid := (faultReg.valid || slot.shouldWriteback()) &&
-      slot.op.isOneOf(LsuOp.LB, LsuOp.LBU, LsuOp.LH, LsuOp.LHU, LsuOp.LW)
+  io.rd.valid := ((faultReg.valid && LsuOp.isScalarLoad(faultReg.bits.op)) || slot.shouldWriteback()) &&
+      currentOp.isOneOf(LsuOp.LB, LsuOp.LBU, LsuOp.LH, LsuOp.LHU, LsuOp.LW)
+
   io.rd.bits.data := slot.scalarLoadResult()
-  io.rd.bits.addr := slot.rd
+  io.rd.bits.addr := Mux(faultReg.valid, faultReg.bits.rd, slot.rd)
 
   // Float writeback
-  io.rd_flt.valid := slot.shouldWriteback() &&
-                     (slot.op === LsuOp.FLOAT) && !slot.store
-  io.rd_flt.bits.addr := slot.rd
+  io.rd_flt.valid := ((faultReg.valid && !currentStore) || slot.shouldWriteback()) &&
+                     (currentOp === LsuOp.FLOAT)
+  io.rd_flt.bits.addr := Mux(faultReg.valid, faultReg.bits.rd, slot.rd)
   io.rd_flt.bits.data := slot.scalarLoadResult()
 
   // Vector writeback
   if (p.enableRvv) {
-    io.lsu2rvv.get(0).valid := slot.shouldWriteback() && LsuOp.isVector(slot.op)
-    io.lsu2rvv.get(0).bits.addr := slot.rd
+    val faultDetected = faultReg.valid
+    // If a fault occurs, we must still signal completion to the RVV core so it can
+    // retire the instruction (and take the trap).
+    val vectorFault = faultDetected && LsuOp.isVector(currentOp)
+
+    io.lsu2rvv.get(0).valid := (slot.shouldWriteback() && LsuOp.isVector(currentOp)) || vectorFault
+    io.lsu2rvv.get(0).bits.addr := Mux(faultReg.valid, faultReg.bits.rd, slot.rd)
     io.lsu2rvv.get(0).bits.data := Cat(slot.data.reverse)
-    io.lsu2rvv.get(0).bits.last := slot.shouldWriteback() &&
-        slot.op.isOneOf(LsuOp.VSTORE_UNIT, LsuOp.VSTORE_STRIDED,
+    io.lsu2rvv.get(0).bits.last := (slot.shouldWriteback() || vectorFault) &&
+        currentOp.isOneOf(LsuOp.VSTORE_UNIT, LsuOp.VSTORE_STRIDED,
                         LsuOp.VSTORE_OINDEXED, LsuOp.VSTORE_UINDEXED)
 
     io.lsu2rvv.get(1).valid := false.B
@@ -1025,7 +1054,7 @@ class LsuV2(p: Parameters) extends Lsu(p) {
   // Slot update
   val slotNext = MuxCase(slot, Seq(
     // Move to inactive if error.
-    faultReg.valid -> LsuSlot.inactive(p, 16),
+    (faultReg.valid) -> LsuSlot.inactive(p, 16),
     // When inactive, dequeue if possible
     (slot.slotIdle() && (opQueue.io.nEnqueued > 0.U)) -> nextSlot,
     // Vector update.

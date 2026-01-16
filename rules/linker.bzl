@@ -1,0 +1,52 @@
+# Copyright 2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Rules for generating linker scripts."""
+
+def _generate_linker_script_impl(ctx):
+    """Implementation for the generate_linker_script rule."""
+    output_script = ctx.outputs.out
+    template = ctx.file.src
+
+    # Default ITCM size is 8KB, DTCM is 32KB.
+    # From //hdl/chisel/src/coralnpu:Parameters.scala
+    itcm_size_kbytes_default = 8
+    dtcm_size_kbytes_default = 32
+    dtcm_origin_default = "0x00010000"
+    dtcm_origin_highmem = "0x00100000"
+    dtcm_origin = dtcm_origin_default
+    if ctx.attr.itcm_size_kbytes != itcm_size_kbytes_default or ctx.attr.dtcm_size_kbytes != dtcm_size_kbytes_default:
+        dtcm_origin = dtcm_origin_highmem
+
+    substitutions = {
+        "@@ITCM_LENGTH@@": str(ctx.attr.itcm_size_kbytes),
+        "@@DTCM_LENGTH@@": str(ctx.attr.dtcm_size_kbytes),
+        "@@DTCM_ORIGIN@@": dtcm_origin,
+    }
+
+    ctx.actions.expand_template(
+        template = template,
+        output = output_script,
+        substitutions = substitutions,
+    )
+
+generate_linker_script = rule(
+    implementation = _generate_linker_script_impl,
+    attrs = {
+        "src": attr.label(mandatory = True, allow_single_file = True),
+        "out": attr.output(mandatory = True),
+        "itcm_size_kbytes": attr.int(mandatory = True),
+        "dtcm_size_kbytes": attr.int(mandatory = True),
+    },
+)

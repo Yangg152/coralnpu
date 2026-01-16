@@ -108,7 +108,8 @@ coralnpu_v2_binary(
         "tflite_micro_test.cc",
     ],
     hdrs = ["hello_world_tflite.h"],
-    linker_script = "@coralnpu_hw//toolchain:coralnpu_tcm_highmem.ld",
+    itcm_size_kbytes = 1024,  # Highmem
+    dtcm_size_kbytes = 1024,  # Highmem
     deps = [
         "@tflite_micro//tensorflow/lite/micro:micro_framework",
         "@tflite_micro//tensorflow/lite/micro:micro_log",

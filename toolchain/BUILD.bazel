@@ -15,13 +15,32 @@
 package(default_visibility = ["//visibility:public"])
 
 load(":cc_toolchain_config.bzl", "coralnpu_v2_cc_toolchain_config")
+load("//rules:linker.bzl", "generate_linker_script")
+
+exports_files(["coralnpu_tcm.ld.tpl"])
+
+# cache_size_param/hw/coralnpu/rules/coralnpu_v2.bzl handles custom TCM sizes. Used for 512KB TCM initially.
+# TODO(stefanhall): Remove this once we move to the new rules.
+generate_linker_script(
+    name = "coralnpu_tcm_ld",
+    src = "coralnpu_tcm.ld.tpl",
+    out = "coralnpu_tcm.ld",
+    dtcm_size_kbytes = 32,
+    itcm_size_kbytes = 8,
+)
+
+generate_linker_script(
+    name = "coralnpu_tcm_highmem_ld",
+    src = "coralnpu_tcm.ld.tpl",
+    out = "coralnpu_tcm_highmem.ld",
+    dtcm_size_kbytes = 1024,  # Highmem
+    itcm_size_kbytes = 1024,  # Highmem
+)
 
 filegroup(
     name = "all_files",
     srcs = [
         "//toolchain/wrappers:all",
-        "//toolchain:coralnpu_tcm.ld",
-        "//toolchain:coralnpu_tcm_highmem.ld",
         "@toolchain_coralnpu_v2//:all_files",
     ],
 )

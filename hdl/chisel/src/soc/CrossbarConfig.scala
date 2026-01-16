@@ -15,6 +15,8 @@
 package coralnpu.soc
 
 import chisel3._
+import coralnpu.Parameters
+import coralnpu.MemorySize
 
 /**
  * A simple case class for defining memory regions.
@@ -55,12 +57,12 @@ case class DeviceConfig(
 )
 
 object CrossbarConfig {
-  def apply(enableHighmem: Boolean = false): CrossbarConfig = {
-    new CrossbarConfig(enableHighmem)
+  def apply(itcmSize: MemorySize = MemorySize.fromKBytes(Parameters.itcmSizeKBytesDefault), dtcmSize: MemorySize = MemorySize.fromKBytes(Parameters.dtcmSizeKBytesDefault)): CrossbarConfig = {
+    new CrossbarConfig(itcmSize, dtcmSize)
   }
 }
 
-class CrossbarConfig(enableHighmem: Boolean) {
+class CrossbarConfig(itcmSize: MemorySize, dtcmSize: MemorySize) {
   // List of all host (master) interfaces.
   def hosts(enableTestHarness: Boolean): Seq[HostConfig] = {
     val baseHosts = Seq(
@@ -74,18 +76,25 @@ class CrossbarConfig(enableHighmem: Boolean) {
     }
   }
 
-  val coralnpu_ranges = if (enableHighmem) {
-    Seq(
-      AddressRange(0x00000000, 0x100000),    // 1MB
-      AddressRange(0x00100000, 0x100000),    // 1MB
-      AddressRange(0x00200000, 0x1000)     // 4kB
-    )
-  } else {
-    Seq(
-      AddressRange(0x00000000, 0x2000),    // 8kB
-      AddressRange(0x00010000, 0x8000),    // 32kB
-      AddressRange(0x00030000, 0x1000)     // 4kB
-    )
+  val coralnpu_ranges = {
+    val defaultItcmSize = MemorySize.fromKBytes(Parameters.itcmSizeKBytesDefault)
+    val defaultDtcmSize = MemorySize.fromKBytes(Parameters.dtcmSizeKBytesDefault)
+
+    if (itcmSize == defaultItcmSize && dtcmSize == defaultDtcmSize) {
+      // Default configuration
+      Seq(
+        AddressRange(0x00000000, 0x00002000),    // 8kB ITCM
+        AddressRange(0x00010000, 0x00008000),    // 32kB DTCM
+        AddressRange(0x00030000, 0x00001000)     // 4kB peripheral space (default peripheral address)
+      )
+    } else {
+      // Custom configuration
+      Seq(
+        AddressRange(0x00000000, itcmSize.bytes),
+        AddressRange(0x00100000, dtcmSize.bytes),
+        AddressRange(0x00200000, 0x00001000)     // 4kB peripheral space (custom peripheral address)
+      )
+    }
   }
 
   // List of all device (slave) interfaces with their address maps.

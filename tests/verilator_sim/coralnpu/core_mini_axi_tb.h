@@ -129,7 +129,6 @@ struct CoreMiniAxi_tb : Sysc_tb {
     sc_signal<sc_bv<32>> float_writeData_0_bits_data;
     sc_signal<sc_bv<32>> float_writeData_1_bits_data;
 #endif
-#if (KP_useRetirementBuffer == true)
 #if (KP_enableRvv == true)
 #define RB_DEBUG_IO_DATA_WIDTH KP_rvvVlen
 #else
@@ -145,7 +144,6 @@ struct CoreMiniAxi_tb : Sysc_tb {
   REPEAT(RB_DEBUG_IO, KP_retirementBufferSize);
 #undef RB_DEBUG_IO
 #undef RB_DEBUG_IO_DATA_WIDTH
-#endif
   };
 
   struct DebugModuleIO {

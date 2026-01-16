@@ -4,13 +4,14 @@ import chisel3._
 import chisel3.util.MixedVec
 import bus._
 import coralnpu.Parameters
+import coralnpu.MemorySize
 import coralnpu.CoreTlul
 
 /**
  * This is the IO bundle for the unified Chisel subsystem.
  */
-class CoralNPUChiselSubsystemIO(val hostParams: Seq[bus.TLULParameters], val deviceParams: Seq[bus.TLULParameters], val enableTestHarness: Boolean, val enableHighmem: Boolean) extends Bundle {
-  val cfg = SoCChiselConfig(enableHighmem).crossbar
+class CoralNPUChiselSubsystemIO(val hostParams: Seq[bus.TLULParameters], val deviceParams: Seq[bus.TLULParameters], val enableTestHarness: Boolean, val itcmSize: MemorySize, val dtcmSize: MemorySize) extends Bundle {
+  val cfg = SoCChiselConfig(itcmSize, dtcmSize).crossbar
 
   // --- Clocks and Resets ---
   val clk_i = Input(Clock())
@@ -30,8 +31,8 @@ class CoralNPUChiselSubsystemIO(val hostParams: Seq[bus.TLULParameters], val dev
   }
 
   // --- Identify Internal vs. External Connections ---
-  val internalHosts = SoCChiselConfig(enableHighmem).modules.flatMap(_.hostConnections.values).toSet
-  val internalDevices = SoCChiselConfig(enableHighmem).modules.flatMap(_.deviceConnections.values).toSet
+  val internalHosts = SoCChiselConfig(itcmSize, dtcmSize).modules.flatMap(_.hostConnections.values).toSet
+  val internalDevices = SoCChiselConfig(itcmSize, dtcmSize).modules.flatMap(_.deviceConnections.values).toSet
 
   // These devices are handled specially within the subsystem (e.g., converted to AXI)
   // and should not have external TileLink ports created for them.
@@ -56,7 +57,7 @@ class CoralNPUChiselSubsystemIO(val hostParams: Seq[bus.TLULParameters], val dev
   }
 
   // --- Manually define peripheral ports for now ---
-  val allExternalPortsConfig = SoCChiselConfig(enableHighmem).modules.flatMap(_.externalPorts)
+  val allExternalPortsConfig = SoCChiselConfig(itcmSize, dtcmSize).modules.flatMap(_.externalPorts)
   val external_ports = MixedVec(allExternalPortsConfig.map { p =>
     val port = p.portType match {
       case coralnpu.soc.Clk  => Clock()
@@ -82,12 +83,19 @@ import scala.collection.mutable
 /**
  * A generator for the entire Chisel-based subsystem of the CoralNPU SoC.
  */
-class CoralNPUChiselSubsystem(val hostParams: Seq[bus.TLULParameters], val deviceParams: Seq[bus.TLULParameters], val enableTestHarness: Boolean, val enableHighmem: Boolean) extends RawModule {
+class CoralNPUChiselSubsystem(val hostParams: Seq[bus.TLULParameters], val deviceParams: Seq[bus.TLULParameters], val enableTestHarness: Boolean, val itcmSize: MemorySize, val dtcmSize: MemorySize) extends RawModule {
   val testHarnessSuffix = if (enableTestHarness) "TestHarness" else ""
-  val highmemSuffix = if (enableHighmem) "Highmem" else ""
-  override val desiredName = "CoralNPUChiselSubsystem" + testHarnessSuffix + highmemSuffix
-  val io = IO(new CoralNPUChiselSubsystemIO(hostParams, deviceParams, enableTestHarness, enableHighmem))
-  val cfg = SoCChiselConfig(enableHighmem).crossbar
+  override val desiredName = {
+    if (itcmSize.kBytes == Parameters.itcmSizeKBytesDefault && dtcmSize.kBytes == Parameters.dtcmSizeKBytesDefault) {
+      "CoralNPUChiselSubsystem" + testHarnessSuffix
+    } else if (itcmSize.kBytes == Parameters.itcmSizeKBytesHighmem && dtcmSize.kBytes == Parameters.dtcmSizeKBytesHighmem) {
+      "CoralNPUChiselSubsystemHighmem" + testHarnessSuffix
+    } else {
+      s"CoralNPUChiselSubsystem_ITCM${itcmSize.kBytes}KB_DTCM${dtcmSize.kBytes}KB" + testHarnessSuffix
+    }
+  }
+  val io = IO(new CoralNPUChiselSubsystemIO(hostParams, deviceParams, enableTestHarness, itcmSize, dtcmSize))
+  val cfg = SoCChiselConfig(itcmSize, dtcmSize).crossbar
 
   /**
    * A helper function to recursively traverse a Chisel Bundle and populate a
@@ -110,7 +118,7 @@ class CoralNPUChiselSubsystem(val hostParams: Seq[bus.TLULParameters], val devic
 
   withClockAndReset(io.clk_i, (!io.rst_ni.asBool).asAsyncReset) {
     // --- Instantiate Core Chisel Components ---
-    val xbar = Module(new CoralNPUXbar(hostParams, deviceParams, enableTestHarness, enableHighmem))
+    val xbar = Module(new CoralNPUXbar(hostParams, deviceParams, enableTestHarness, itcmSize, dtcmSize))
 
     // --- Dynamic Module Instantiation ---
     def instantiateModule(config: ChiselModuleConfig): BaseModule = {
@@ -123,7 +131,6 @@ class CoralNPUChiselSubsystem(val hostParams: Seq[bus.TLULParameters], val devic
           core_p.enableFetchL0 = p.enableFetchL0
           core_p.fetchDataBits = p.fetchDataBits
           core_p.enableFloat = p.enableFloat
-          core_p.tcmHighmem = p.tcmHighmem
           Module(new CoreTlul(core_p, config.name))
 
         case p: Spi2TlulParameters =>
@@ -133,7 +140,7 @@ class CoralNPUChiselSubsystem(val hostParams: Seq[bus.TLULParameters], val devic
       }
     }
 
-    val instantiatedModules = SoCChiselConfig(enableHighmem).modules.map {
+    val instantiatedModules = SoCChiselConfig(itcmSize, dtcmSize).modules.map {
       config =>
       config.name -> instantiateModule(config)
     }.toMap
@@ -160,7 +167,7 @@ class CoralNPUChiselSubsystem(val hostParams: Seq[bus.TLULParameters], val devic
     }
 
     // Connect all modules based on the configuration.
-    SoCChiselConfig(enableHighmem).modules.foreach {
+    SoCChiselConfig(itcmSize, dtcmSize).modules.foreach {
       config =>
       config.hostConnections.foreach { case (modulePort, xbarPort) =>
         modulePorts(s"${config.name}.$modulePort") <> xbar.io.hosts(hostMap(xbarPort))
@@ -263,22 +270,36 @@ class CoralNPUChiselSubsystem(val hostParams: Seq[bus.TLULParameters], val devic
 import _root_.circt.stage.ChiselStage
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Paths, StandardOpenOption}
+import coralnpu.Parameters
 
 object CoralNPUChiselSubsystemEmitter extends App {
   val enableTestHarness = args.contains("--enableTestHarness")
-  val enableHighmem = args.contains("--enableHighmem")
+
+  // --- Parse command-line arguments for TCM sizes ---
+  var itcmSizeKBytes = Parameters.itcmSizeKBytesDefault // Default ITCM size in KBytes
+  var dtcmSizeKBytes = Parameters.dtcmSizeKBytesDefault // Default DTCM size in KBytes
+  args.sliding(2, 1).foreach {
+    case Array("--itcmSizeKBytes", size) => itcmSizeKBytes = size.toInt
+    case Array("--dtcmSizeKBytes", size) => dtcmSizeKBytes = size.toInt
+    case _ =>
+  }
+
+  val itcmSize = MemorySize.fromKBytes(itcmSizeKBytes)
+  val dtcmSize = MemorySize.fromKBytes(dtcmSizeKBytes)
+
   val chiselArgs = args.filterNot(a =>
       a.startsWith("--enableTestHarness") ||
-      a.startsWith("--enableHighmem") ||
+      a.startsWith("--itcmSizeKBytes") || a.toIntOption.isDefined && args(args.indexOf(a) - 1) == "--itcmSizeKBytes" ||
+      a.startsWith("--dtcmSizeKBytes") || a.toIntOption.isDefined && args(args.indexOf(a) - 1) == "--dtcmSizeKBytes" ||
       a.startsWith("--target-dir="))
 
-  val hostParams = SoCChiselConfig(enableHighmem).crossbar.hosts(enableTestHarness).map {
+  val hostParams = SoCChiselConfig(itcmSize, dtcmSize).crossbar.hosts(enableTestHarness).map {
     host =>
     val p = new Parameters
     p.lsuDataBits = host.width
     new bus.TLULParameters(p)
   }
-  val deviceParams = SoCChiselConfig(enableHighmem).crossbar.devices.map {
+  val deviceParams = SoCChiselConfig(itcmSize, dtcmSize).crossbar.devices.map {
     device =>
     val p = new Parameters
     p.lsuDataBits = device.width
@@ -294,7 +315,7 @@ object CoralNPUChiselSubsystemEmitter extends App {
   }
 
   // The subsystem module must be created in the ChiselStage context.
-  lazy val subsystem = new CoralNPUChiselSubsystem(hostParams, deviceParams, enableTestHarness, enableHighmem)
+  lazy val subsystem = new CoralNPUChiselSubsystem(hostParams, deviceParams, enableTestHarness, itcmSize, dtcmSize)
 
   val firtoolOpts = Array(
       // Disable `automatic logic =`, Suppress location comments

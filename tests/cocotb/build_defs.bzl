@@ -44,6 +44,8 @@ VCS_BUILD_ARGS = [
 
 VCS_TEST_ARGS = [
     "+vcs+fsdbon",
+    "+fsdb+mda",
+    "+fsdb+struct",
     "-cm",
     "line+cond+tgl+branch+assert",
 ]

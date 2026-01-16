@@ -189,7 +189,7 @@ class DebugIO(p: Parameters) extends Bundle {
     }))
   })
 
-  val rb = Option.when(p.useRetirementBuffer)(Output(new RetirementBufferDebugIO(p)))
+  val rb = Output(new RetirementBufferDebugIO(p))
 }
 
 class RegfileReadDataIO extends Bundle {

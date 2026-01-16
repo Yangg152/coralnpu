@@ -16,12 +16,12 @@
 import argparse
 import numpy as np
 from elftools.elf.elffile import ELFFile
-from ftdi_spi_master import FtdiSpiMaster
+from coralnpu_hw.coralnpu_test_utils.ftdi_spi_master import FtdiSpiMaster
 
 class MatmulRunner:
     """Runs a matrix multiplication test on the CoralNPU hardware."""
 
-    def __init__(self, elf_path, usb_serial, ftdi_port=1):
+    def __init__(self, elf_path, usb_serial, ftdi_port=1, csr_base_addr=0x30000):
         """
         Initializes the MatmulRunner.
 
@@ -29,9 +29,10 @@ class MatmulRunner:
             elf_path: Path to the rvv_matmul.elf file.
             usb_serial: USB serial number of the FTDI device.
             ftdi_port: Port number of the FTDI device.
+            csr_base_addr: Base address for CSR registers.
         """
         self.elf_path = elf_path
-        self.spi_master = FtdiSpiMaster(usb_serial, ftdi_port)
+        self.spi_master = FtdiSpiMaster(usb_serial, ftdi_port, csr_base_addr)
         self.addr_lhs = None
         self.addr_rhs = None
         self.addr_result = None
@@ -130,10 +131,11 @@ def main():
     parser.add_argument("elf_file", help="Path to the rvv_matmul.elf file.")
     parser.add_argument("--usb-serial", required=True, help="USB serial number of the FTDI device.")
     parser.add_argument("--ftdi-port", type=int, default=1, help="Port number of the FTDI device.")
+    parser.add_argument("--csr-base-addr", type=lambda x: int(x, 0), default=0x30000, help="Base address for CSR registers (can be hex, default: 0x30000).")
     args = parser.parse_args()
 
     try:
-        runner = MatmulRunner(args.elf_file, args.usb_serial, args.ftdi_port)
+        runner = MatmulRunner(args.elf_file, args.usb_serial, args.ftdi_port, args.csr_base_addr)
         runner.run_test()
     except (ValueError, FileNotFoundError) as e:
         print(f"Error: {e}")

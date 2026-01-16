@@ -88,6 +88,24 @@ sc_top::sc_top(sc_core::sc_module_name name)
   core.io_dm_rsp_bits_data(dm.rsp_bits_data);
   core.io_dm_rsp_bits_op(dm.rsp_bits_op);
 #endif
+
+#define BIND_RB_SIGNALS(x) \
+  core.io_debug_rb_inst_##x##_valid(debug.rb_inst_##x##_valid); \
+  core.io_debug_rb_inst_##x##_bits_pc(debug.rb_inst_##x##_bits_pc); \
+  core.io_debug_rb_inst_##x##_bits_inst(debug.rb_inst_##x##_bits_inst); \
+  core.io_debug_rb_inst_##x##_bits_idx(debug.rb_inst_##x##_bits_idx); \
+  core.io_debug_rb_inst_##x##_bits_data(debug.rb_inst_##x##_bits_data); \
+  core.io_debug_rb_inst_##x##_bits_trap(debug.rb_inst_##x##_bits_trap);
+
+  BIND_RB_SIGNALS(0)
+  BIND_RB_SIGNALS(1)
+  BIND_RB_SIGNALS(2)
+  BIND_RB_SIGNALS(3)
+  BIND_RB_SIGNALS(4)
+  BIND_RB_SIGNALS(5)
+  BIND_RB_SIGNALS(6)
+  BIND_RB_SIGNALS(7)
+#undef BIND_RB_SIGNALS
   // AR
   core.io_axi_master_read_addr_ready(master_arready_4);
   core.io_axi_master_read_addr_valid(master_arvalid_4);

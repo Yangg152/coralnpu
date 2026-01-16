@@ -26,6 +26,26 @@ template_rule(
         "rvv_matmul": {
             "srcs": ["rvv_matmul.cc"],
         },
+        "rvv_matmul_assembly_highmem": {
+            "srcs": ["rvv_matmul_assembly.cc"],
+            "itcm_size_kbytes": 1024,
+            "dtcm_size_kbytes": 1024,
+        },
+        "rvv_matmul_highmem": {
+            "srcs": ["rvv_matmul.cc"],
+            "itcm_size_kbytes": 1024,
+            "dtcm_size_kbytes": 1024,
+        },
+        "rvv_matmul_assembly_itcm512kb_dtcm512kb": {
+            "srcs": ["rvv_matmul_assembly.cc"],
+            "itcm_size_kbytes": 512,
+            "dtcm_size_kbytes": 512,
+        },
+        "rvv_matmul_itcm512kb_dtcm512kb": {
+            "srcs": ["rvv_matmul.cc"],
+            "itcm_size_kbytes": 512,
+            "dtcm_size_kbytes": 512,
+        },
     },
 )
 

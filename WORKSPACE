@@ -24,6 +24,7 @@ load(
     "coralnpu_repos2",
     "rvvi_repos",
     "tflite_repos",
+    "mpact_repos",
 )
 
 http_archive(
@@ -36,6 +37,10 @@ http_archive(
 load("@rules_cc//cc:repositories.bzl", "rules_cc_dependencies", "rules_cc_toolchains")
 
 rules_cc_dependencies()
+
+register_toolchains(
+    "//toolchain/host_clang:host_clang_toolchain_def",
+)
 
 rules_cc_toolchains()
 
@@ -189,6 +194,17 @@ bazel_features_deps()
 load("@rules_cc//cc:extensions.bzl", "compatibility_proxy_repo")
 
 compatibility_proxy_repo()
+
+mpact_repos()
+
+load("@com_google_mpact-riscv//:repos.bzl", "mpact_riscv_repos")
+mpact_riscv_repos()
+
+load("@com_google_mpact-riscv//:dep_repos.bzl", "mpact_riscv_dep_repos")
+mpact_riscv_dep_repos()
+
+load("@com_google_mpact-riscv//:deps.bzl", "mpact_riscv_deps")
+mpact_riscv_deps()
 
 load("@coralnpu_hw//rules:check_folder.bzl", "check_folder")
 
