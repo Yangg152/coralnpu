@@ -5,10 +5,7 @@
 #include <cstdint>
 #include <vector>
 
-// [MUL] 通常位于 integer_ops 下，命名空间为 reference_integer_ops
 #include "tensorflow/lite/kernels/internal/reference/integer_ops/mul.h"
-
-// [SUB] 根据你提供的头文件，它直接位于 reference 下，命名空间为 reference_ops
 #include "tensorflow/lite/kernels/internal/reference/sub.h" 
 
 namespace {
@@ -77,13 +74,39 @@ extern "C" {
 // ---------------------------------------------------------
 
 __attribute__((used, retain)) void run_ref_mul() {
-  // MUL 使用 reference_integer_ops
-  tflite::reference_integer_ops::Mul(
-      params, 
-      input1_shape_, input1_data,
-      input2_shape_, input2_data,
-      output_shape_, output_data);
+  // 1. 简单的 Shape 对比
+  bool need_broadcast = false;
+  int dims = input1_shape_.DimensionsCount();
+  
+  if (input2_shape_.DimensionsCount() != dims) {
+    need_broadcast = true;
+  } else {
+    for (int i = 0; i < dims; ++i) {
+      if (input1_shape_.Dims(i) != input2_shape_.Dims(i)) {
+        need_broadcast = true;
+        break;
+      }
+    }
+  }
+
+  // 2. 根据判断结果分发
+  if (need_broadcast) {
+    // 广播模式：调用 integer_ops 下的 Broadcast 方法
+    tflite::reference_integer_ops::BroadcastMul4DSlow(
+        params, 
+        input1_shape_, input1_data,
+        input2_shape_, input2_data,
+        output_shape_, output_data);
+  } else {
+    // 元素对元素模式
+    tflite::reference_integer_ops::Mul(
+        params, 
+        input1_shape_, input1_data,
+        input2_shape_, input2_data,
+        output_shape_, output_data);
+  }
 }
+
 
 __attribute__((used, retain)) void run_opt_mul() {
   int flat_size = output_shape_.FlatSize();
@@ -111,13 +134,41 @@ __attribute__((used, retain)) void run_opt_mul() {
 // ---------------------------------------------------------
 
 __attribute__((used, retain)) void run_ref_sub() {
-   // [关键点] SUB 使用 reference_ops，且头文件路径是 reference/sub.h
-   tflite::reference_ops::Sub(
-      params, 
-      input1_shape_, input1_data,
-      input2_shape_, input2_data,
-      output_shape_, output_data);
+  // 1. 判断是否需要广播 (逻辑与 Mul 相同)
+  bool need_broadcast = false;
+  int dims = input1_shape_.DimensionsCount();
+  
+  if (input2_shape_.DimensionsCount() != dims) {
+    need_broadcast = true;
+  } else {
+    for (int i = 0; i < dims; ++i) {
+      if (input1_shape_.Dims(i) != input2_shape_.Dims(i)) {
+        need_broadcast = true;
+        break;
+      }
+    }
+  }
+
+  // 2. 手动分发
+  if (need_broadcast) {
+    // [关键点]：广播模式调用 BroadcastQuantSubSlow
+    // 这个函数在 sub.h 第 280 行定义，支持 int8_t 量化广播
+    tflite::reference_ops::BroadcastQuantSubSlow(
+        params, 
+        input1_shape_, input1_data,
+        input2_shape_, input2_data,
+        output_shape_, output_data);
+  } else {
+    // Element-wise 模式继续调用 Sub
+    // 此时它会命中 sub.h 第 344 行的 int8_t 重载，效率较高
+    tflite::reference_ops::Sub(
+        params, 
+        input1_shape_, input1_data,
+        input2_shape_, input2_data,
+        output_shape_, output_data);
+  }
 }
+
 
 __attribute__((used, retain)) void run_opt_sub() {
   int flat_size = output_shape_.FlatSize();

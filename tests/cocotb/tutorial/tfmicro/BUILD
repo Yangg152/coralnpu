@@ -38,6 +38,7 @@ coralnpu_v2_binary(
         "//sw/opt/litert-micro:sub",
         "//sw/opt/litert-micro:conv",
         "//sw/opt/litert-micro:depthwise_conv",
+        "//sw/opt/litert-micro:mean", 
         "@tflite_micro//tensorflow/lite/micro:micro_framework",
         "@tflite_micro//tensorflow/lite/micro:micro_log",
         "@tflite_micro//tensorflow/lite/micro:micro_profiler",
@@ -176,6 +177,7 @@ coralnpu_v2_binary(
         "//sw/opt/litert-micro:sub",
         "//sw/opt/litert-micro:conv",
         "//sw/opt/litert-micro:depthwise_conv",
+        "//sw/opt/litert-micro:mean", 
         "@tflite_micro//tensorflow/lite/micro:micro_framework",
         "@tflite_micro//tensorflow/lite/micro:micro_log",
         "@tflite_micro//tensorflow/lite/micro:micro_profiler",
@@ -217,7 +219,7 @@ cocotb_test_suite(
     verilator_model = "//tests/cocotb:rvv_core_mini_highmem_axi_model",
 )
 
-# 1. 编译 C++ 测试二进制
+# conv
 coralnpu_v2_binary(
     name = "conv_test", # 生成 conv_test.elf
     srcs = ["conv_test.cc"],
@@ -311,6 +313,55 @@ cocotb_test_suite(
             "@rules_python//python/runfiles",
         ],
         "data": ["mul_sub_test.elf"],
+    },
+    vcs_build_args = VCS_BUILD_ARGS,
+    vcs_data = glob(["**/*.elf"]) + [
+        "//tests/cocotb:coverage_exclude.cfg",
+    ],
+    vcs_defines = VCS_DEFINES,
+    vcs_test_args = VCS_TEST_ARGS,
+    vcs_verilog_sources = ["//hdl/chisel/src/coralnpu:rvv_core_mini_highmem_axi_cc_library_verilog"],
+    verilator_model = "//tests/cocotb:rvv_core_mini_highmem_axi_model",
+)
+
+# mean
+# 1. 编译 C++ 测试二进制
+coralnpu_v2_binary(
+    name = "mean_test", # 生成 mean_test.elf
+    srcs = ["mean_test.cc"],
+    linker_script = "@coralnpu_hw//toolchain:coralnpu_tcm_highmem.ld",
+    deps = [
+        "//sw/opt/litert-micro:mean", 
+        "//sw/opt/litert-micro:depthwise_conv", # 借用一下配置
+        "@tflite_micro//tensorflow/lite/kernels/internal:reference_base"
+    ],
+)
+
+# 2. 定义 Python 测试套件
+cocotb_test_suite(
+    name = "cocotb_mean",
+    simulators = [
+        "verilator",
+        "vcs",
+    ],
+    testcases = [
+        "test_mean_small",
+        "test_mean_mobilenet_style",
+        "test_mean_large_spatial",
+        "test_mean_odd_channel",
+    ],
+    tests_kwargs = {
+        "waves": False, # 调试时可以设为 True
+        "hdl_toplevel": "RvvCoreMiniHighmemAxi",
+        "size": "enormous",
+        "default_testcase_size": "medium",
+        "test_module": ["cocotb_mean.py"],
+        "deps": [
+            "//coralnpu_test_utils:core_mini_axi_sim_interface",
+            "//coralnpu_test_utils:sim_test_fixture",
+            "@rules_python//python/runfiles",
+        ],
+        "data": ["mean_test.elf"],
     },
     vcs_build_args = VCS_BUILD_ARGS,
     vcs_data = glob(["**/*.elf"]) + [

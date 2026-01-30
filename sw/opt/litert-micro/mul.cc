@@ -96,18 +96,30 @@ void MulQuantizedBroadcastScalar(
     int flat_size, const ArithmeticParams& params) {
 
   int32_t offset1 = params.input1_offset;
+  // 计算标量部分 (int16_t)
   int16_t scalar_term = (int16_t)((int32_t)input_scalar_val + params.input2_offset);
 
   size_t n = flat_size;
   while (n > 0) {
     size_t vl = __riscv_vsetvl_e8m2(n);
 
+    // 1. 加载输入向量 (int8, LMUL=2)
     vint8m2_t v1 = __riscv_vle8_v_i8m2(input_vec_data, vl);
+    
+    // 2. 符号扩展 (int8 -> int16, LMUL=4)
     vint16m4_t v1_16 = __riscv_vsext_vf2_i16m4(v1, vl);
+    
+    // 3. 加上 offset1
     v1_16 = __riscv_vadd_vx_i16m4(v1_16, offset1, vl);
+    
+    // 4. 将标量广播到临时向量 (int16, LMUL=4)
+    // 确保这里的类型 (i16m4) 与 v1_16 一致
+    vint16m4_t v_scalar = __riscv_vmv_v_x_i16m4(scalar_term, vl);
+    
+    // 5. 使用 Vector-Vector 变宽乘法 (int16 * int16 -> int32, LMUL=8)
+    vint32m8_t v_acc = __riscv_vwmul_vv_i32m8(v1_16, v_scalar, vl);
 
-    vint32m8_t v_acc = __riscv_vwmul_vx_i32m8(v1_16, scalar_term, vl);
-
+    // 6. 后处理
     VectorQuantizedScaleAndPack(v_acc, params, output_data, vl);
 
     input_vec_data += vl;
@@ -115,6 +127,7 @@ void MulQuantizedBroadcastScalar(
     n -= vl;
   }
 }
+
 
 // =========================================================
 // 2. TFLite Kernel Interface

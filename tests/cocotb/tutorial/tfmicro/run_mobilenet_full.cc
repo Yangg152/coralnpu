@@ -19,6 +19,7 @@
 #include "sw/opt/litert-micro/depthwise_conv.h" 
 #include "sw/opt/litert-micro/mul.h" 
 #include "sw/opt/litert-micro/sub.h" 
+#include "sw/opt/litert-micro/mean.h" 
 
 #include "tensorflow/lite/core/c/common.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
@@ -68,6 +69,7 @@ using coralnpu_v2::opt::litert_micro::Register_CONV_2D;
 using coralnpu_v2::opt::litert_micro::Register_DEPTHWISE_CONV_2D;
 using coralnpu_v2::opt::litert_micro::Register_Mul;
 using coralnpu_v2::opt::litert_micro::Register_Sub;
+using coralnpu_v2::opt::litert_micro::Register_MEAN
 
 TfLiteStatus RegisterOps(MobilenetOpResolver& op_resolver) {
   // === 1. 核心卷积 (RVV优化) ===

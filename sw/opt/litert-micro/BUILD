@@ -29,6 +29,23 @@ cc_library(
 )
 
 cc_library(
+    name = "mean",
+    srcs = [
+        "accumulator_util.h",
+        "mean.cc",
+    ],
+    hdrs = ["mean.h"],
+    target_compatible_with = ["//platforms/cpu:coralnpu_v2"],
+    deps = [
+        "//sw/opt:rvv_opt",
+        "@tflite_micro//tensorflow/lite/micro:op_resolvers",
+        "@tflite_micro//tensorflow/lite/kernels/internal:reference",
+        "@tflite_micro//tensorflow/lite/micro:micro_framework",
+        "@tflite_micro//tensorflow/lite/micro/kernels:micro_ops",
+    ],
+)
+
+cc_library(
     name = "mul",
     srcs = [
         "accumulator_util.h",
