@@ -113,8 +113,8 @@ async def core_mini_rvv_mobilenet_v1(dut):
             print(f"[Sim] Running... {count * step_cycles} cycles", flush=True)
 
     # === 主流程 ===
-    elf_files = ['run_mobilenet_v1_025_partial_binary.elf'] 
-    # elf_files = ['run_mobilenet_v1_025_128_quant_binary.elf'] 
+    #elf_files = ['run_mobilenet_v1_025_partial_binary.elf'] 
+    elf_files = ['run_mobilenet_v1_025_128_quant_binary.elf'] 
     
     for elf_file in elf_files:
         # 加载 ELF 并查找符号地址

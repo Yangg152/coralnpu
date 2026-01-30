@@ -30,20 +30,18 @@
 
 // === 全局变量定义 ===
 extern "C" {
-constexpr size_t kTensorArenaSize = 1024 * 1024; 
+constexpr size_t kTensorArenaSize = 512 * 1024; 
 
 int8_t inference_status = -1;       
 uint32_t inference_cycles = 0;      
 int32_t output_class = -1;          
 int8_t output_score = -128;         
 
-// 状态消息 Buffer
 char inference_status_message[64] 
     __attribute__((section(".data"), aligned(16)));
 
-// 使用标准 .bss 段，避免 .extdata 带来的地址映射问题
 uint8_t tensor_arena[kTensorArenaSize]
-    __attribute__((section(".extdata"), aligned(16)));
+    __attribute__((section(".data"), aligned(16)));
 
 // Profiler 数据
 struct OpLogEntry {
