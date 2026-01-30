@@ -29,13 +29,43 @@ cc_library(
 )
 
 cc_library(
+    name = "mul",
+    srcs = [
+        "accumulator_util.h",
+        "mul.cc",
+    ],
+    hdrs = ["mul.h"],
+    target_compatible_with = ["//platforms/cpu:coralnpu_v2"],
+    deps = [
+        "//sw/opt:rvv_opt",
+        "@tflite_micro//tensorflow/lite/micro:op_resolvers",
+    ],
+)
+
+cc_library(
+    name = "sub",
+    srcs = [
+        "accumulator_util.h",
+        "sub.cc",
+    ],
+    hdrs = ["sub.h"],
+    target_compatible_with = ["//platforms/cpu:coralnpu_v2"],
+    deps = [
+        "//sw/opt:rvv_opt",
+        "@tflite_micro//tensorflow/lite/kernels/internal:reference",
+        "@tflite_micro//tensorflow/lite/micro:micro_framework",
+        "@tflite_micro//tensorflow/lite/micro/kernels:micro_ops",
+    ],
+)
+
+cc_library(
     name = "conv",
     srcs = [
         "accumulator_util.h",
         "conv.cc",
     ],
     hdrs = ["conv.h"],
-    target_compatible_with = ["//platforms/cpu:coralnpu_v2"], # 建议加上硬件约束
+    target_compatible_with = ["//platforms/cpu:coralnpu_v2"], 
     deps = [
         "//sw/opt:rvv_opt",
         "@tflite_micro//tensorflow/lite/micro:op_resolvers",

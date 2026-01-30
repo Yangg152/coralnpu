@@ -34,6 +34,8 @@ coralnpu_v2_binary(
     itcm_size_kbytes = 1024,  # Highmem
     dtcm_size_kbytes = 1024,  # Highmem
     deps = [
+        "//sw/opt/litert-micro:mul",
+        "//sw/opt/litert-micro:sub",
         "//sw/opt/litert-micro:conv",
         "//sw/opt/litert-micro:depthwise_conv",
         "@tflite_micro//tensorflow/lite/micro:micro_framework",
@@ -170,6 +172,8 @@ coralnpu_v2_binary(
     hdrs = ["mobilenet_v1_025_128_quant.h"],
     linker_script = "@coralnpu_hw//toolchain:coralnpu_tcm_highmem.ld",
     deps = [
+        "//sw/opt/litert-micro:mul",
+        "//sw/opt/litert-micro:sub",
         "//sw/opt/litert-micro:conv",
         "//sw/opt/litert-micro:depthwise_conv",
         "@tflite_micro//tensorflow/lite/micro:micro_framework",
@@ -250,6 +254,63 @@ cocotb_test_suite(
             "@rules_python//python/runfiles",
         ],
         "data": ["conv_test.elf"],
+    },
+    vcs_build_args = VCS_BUILD_ARGS,
+    vcs_data = glob(["**/*.elf"]) + [
+        "//tests/cocotb:coverage_exclude.cfg",
+    ],
+    vcs_defines = VCS_DEFINES,
+    vcs_test_args = VCS_TEST_ARGS,
+    vcs_verilog_sources = ["//hdl/chisel/src/coralnpu:rvv_core_mini_highmem_axi_cc_library_verilog"],
+    verilator_model = "//tests/cocotb:rvv_core_mini_highmem_axi_model",
+)
+
+# mul and sub
+coralnpu_v2_binary(
+    name = "mul_sub_test", 
+    srcs = ["mul_sub_test.cc"],
+    linker_script = "@coralnpu_hw//toolchain:coralnpu_tcm_highmem.ld",
+    deps = [
+        "//sw/opt/litert-micro:mul", 
+        "//sw/opt/litert-micro:sub", 
+        "//sw/opt/litert-micro:conv", 
+        "//sw/opt/litert-micro:depthwise_conv", 
+        "@tflite_micro//tensorflow/lite/micro:micro_framework",
+        "@tflite_micro//tensorflow/lite/micro:micro_log",
+        "@tflite_micro//tensorflow/lite/micro:micro_profiler",
+        "@tflite_micro//tensorflow/lite/micro:op_resolvers",
+        "@tflite_micro//tensorflow/lite/micro:system_setup",
+    ],
+)
+
+# 2. 定义 Python 测试套件
+cocotb_test_suite(
+    name = "cocotb_mul_sub",
+    simulators = [
+        "verilator",
+        "vcs",
+    ],
+    testcases = [
+        "test_mul_elementwise_small",
+        "test_sub_elementwise_small",
+        "test_mul_elementwise",
+        "test_mul_broadcast",
+        "test_sub_elementwise",
+        "test_sub_broadcast_vector_minus_scalar",
+        "test_sub_broadcast_scalar_minus_vector",
+    ],
+    tests_kwargs = {
+        "waves": False, # 调试时可以设为 True
+        "hdl_toplevel": "RvvCoreMiniHighmemAxi",
+        "size": "enormous",
+        "default_testcase_size": "medium",
+        "test_module": ["cocotb_mul_sub.py"],
+        "deps": [
+            "//coralnpu_test_utils:core_mini_axi_sim_interface",
+            "//coralnpu_test_utils:sim_test_fixture",
+            "@rules_python//python/runfiles",
+        ],
+        "data": ["mul_sub_test.elf"],
     },
     vcs_build_args = VCS_BUILD_ARGS,
     vcs_data = glob(["**/*.elf"]) + [

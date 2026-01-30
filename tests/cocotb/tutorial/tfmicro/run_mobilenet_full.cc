@@ -17,6 +17,8 @@
 // === 1. 引入优化算子头文件 ===
 #include "sw/opt/litert-micro/conv.h"           
 #include "sw/opt/litert-micro/depthwise_conv.h" 
+#include "sw/opt/litert-micro/mul.h" 
+#include "sw/opt/litert-micro/sub.h" 
 
 #include "tensorflow/lite/core/c/common.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
@@ -64,34 +66,23 @@ namespace {
 using MobilenetOpResolver = tflite::MicroMutableOpResolver<32>;
 using coralnpu_v2::opt::litert_micro::Register_CONV_2D;
 using coralnpu_v2::opt::litert_micro::Register_DEPTHWISE_CONV_2D;
+using coralnpu_v2::opt::litert_micro::Register_Mul;
+using coralnpu_v2::opt::litert_micro::Register_Sub;
 
 TfLiteStatus RegisterOps(MobilenetOpResolver& op_resolver) {
   // === 1. 核心卷积 (RVV优化) ===
+  // TF_LITE_ENSURE_STATUS(op_resolver.AddConv2D());
+  // TF_LITE_ENSURE_STATUS(op_resolver.AddDepthwiseConv2D());
+  // TF_LITE_ENSURE_STATUS(op_resolver.AddMul());
+  // TF_LITE_ENSURE_STATUS(op_resolver.AddSub()); 
+
   TF_LITE_ENSURE_STATUS(op_resolver.AddConv2D(Register_CONV_2D()));
   TF_LITE_ENSURE_STATUS(op_resolver.AddDepthwiseConv2D(Register_DEPTHWISE_CONV_2D()));
-  
-  // === 2. 补全 MobileNet V1 Quant 必备算子 ===
-  // 之前的 AllocateTensors 失败通常是因为缺了 FullyConnected 或 Pad
-  
-  TF_LITE_ENSURE_STATUS(op_resolver.AddAveragePool2D());
-  TF_LITE_ENSURE_STATUS(op_resolver.AddSoftmax());
-  TF_LITE_ENSURE_STATUS(op_resolver.AddReshape());
-  
-  // [重要] 分类层通常被转换为全连接
-  TF_LITE_ENSURE_STATUS(op_resolver.AddFullyConnected()); 
-  
-  // [重要] 量化模型常见算子
-  TF_LITE_ENSURE_STATUS(op_resolver.AddAdd());
-  TF_LITE_ENSURE_STATUS(op_resolver.AddMul());
-  TF_LITE_ENSURE_STATUS(op_resolver.AddConcatenation());
-  TF_LITE_ENSURE_STATUS(op_resolver.AddQuantize());
-  TF_LITE_ENSURE_STATUS(op_resolver.AddDequantize());
-  TF_LITE_ENSURE_STATUS(op_resolver.AddMean());
-  
-  // [重要] 形状/边缘处理
-  TF_LITE_ENSURE_STATUS(op_resolver.AddPad());
-  TF_LITE_ENSURE_STATUS(op_resolver.AddPadV2());
+  TF_LITE_ENSURE_STATUS(op_resolver.AddMul(Register_Mul()));
+  TF_LITE_ENSURE_STATUS(op_resolver.AddSub(Register_Sub())); 
 
+  TF_LITE_ENSURE_STATUS(op_resolver.AddMean());
+  TF_LITE_ENSURE_STATUS(op_resolver.AddReshape());
   return kTfLiteOk;
 }
 
