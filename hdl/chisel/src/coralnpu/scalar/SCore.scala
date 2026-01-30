@@ -349,6 +349,10 @@ class SCore(p: Parameters) extends Module {
       fRegfile.get.io.dm_write_valid.get := io.dm.get.float_rd.get.valid
     }
 
+    // TODO(derekjchow): Stub-off scalar fp writeback
+    if (p.enableRvv) {
+      io.rvvcore.get.async_frd.ready := false.B
+    }
 
     floatCore.get.io.inst <> dispatch.io.float.get
     dispatch.io.fscoreboard.get := fRegfile.get.io.scoreboard
@@ -409,10 +413,22 @@ class SCore(p: Parameters) extends Module {
 
     // Register inputs
     io.rvvcore.get.rs := regfile.io.readData
+    // Floating point register inputs. Stub-off if unused.
+    if (p.enableFloat) {
+      io.rvvcore.get.frs(0) := fRegfile.get.io.read_ports(0).data.asWord
+      for (i <- 1 until p.instructionLanes) {
+        io.rvvcore.get.frs(i) := 0.U
+      }
+    } else {
+      for (i <- 0 until p.instructionLanes) {
+        io.rvvcore.get.frs(i) := 0.U
+      }
+    }
 
     io.rvvcore.get.csr.vstart_write <> csr.io.rvv.get.vstart_write
     io.rvvcore.get.csr.vxrm_write <> csr.io.rvv.get.vxrm_write
     io.rvvcore.get.csr.vxsat_write <> csr.io.rvv.get.vxsat_write
+    io.rvvcore.get.csr.frm := csr.io.rvv.get.frm
     csr.io.rvv.get.vstart := io.rvvcore.get.csr.vstart
     csr.io.rvv.get.vl := io.rvvcore.get.configState.bits.vl
     csr.io.rvv.get.vtype := io.rvvcore.get.configState.bits.vtype

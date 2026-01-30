@@ -34,6 +34,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,t
         gnupg \
         libmpfr-dev \
         lsb-release \
+        openjdk-17-jdk-headless \
+        openjdk-17-jre-headless \
         python-is-python3 \
         python3 \
         python3-pip \
@@ -46,6 +48,21 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,t
         xxd \
         zip
     update-ca-certificates
+    # Install clang-19 and configure
+    apt-get install -y -qq \
+        clang-19 \
+        clang-tools-19 \
+        lld-19 \
+        clang-format-19 \
+        clang-tidy-19
+    ln -s /usr/bin/clang-19 /usr/bin/clang
+    ln -s /usr/bin/clang++-19 /usr/bin/clang++
+    ln -s /usr/bin/clang-cpp-19 /usr/bin/clang-cpp
+    ln -s /usr/bin/clang-format-19 /usr/bin/clang-format
+    ln -s /usr/bin/clang-tidy-19 /usr/bin/clang-tidy
+    ln -s /usr/bin/ld.lld-19 /usr/bin/ld.lld
+    ln -s /usr/bin/llvm-symbolizer-19 /usr/bin/llvm-symbolizer
+    # end clang-19
     curl -fsSL https://bazel.build/bazel-release.pub.gpg | gpg --dearmor > /tmp/bazel-archive-keyring.gpg
     mv /tmp/bazel-archive-keyring.gpg /usr/share/keyrings/
     echo "deb [arch=$(dpkg-architecture -q DEB_HOST_ARCH) signed-by=/usr/share/keyrings/bazel-archive-keyring.gpg] https://storage.googleapis.com/bazel-apt stable jdk1.8" | sudo tee /etc/apt/sources.list.d/bazel.list

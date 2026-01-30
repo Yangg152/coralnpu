@@ -30,6 +30,7 @@ class CsrRvvIO(p: Parameters) extends Bundle {
   val vstart_write = Output(Valid(UInt(log2Ceil(p.rvvVlen).W)))
   val vxrm_write = Output(Valid(UInt(2.W)))
   val vxsat_write = Output(Valid(Bool()))
+  val frm = Output(UInt(3.W))
 }
 
 object Csr {
@@ -474,6 +475,7 @@ class Csr(p: Parameters) extends Module {
     io.rvv.get.vxrm_write.bits    := wdata(1,0)
     io.rvv.get.vxsat_write.valid  := req.valid && vxsatEn.get
     io.rvv.get.vxsat_write.bits   := wdata(0)
+    io.rvv.get.frm                := frm
   }
 
   // mcycle implementation

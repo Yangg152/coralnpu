@@ -12,17 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <cstdint>
-#include <string>
-
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+
+#include <cstdint>
+#include <string>
 
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "sim/coralnpu_v2_simulator.h"
 
+using coralnpu::sim::CoralNPUV2LsuAccessRange;
 using coralnpu::sim::CoralNPUV2Simulator;
 using coralnpu::sim::CoralNPUV2SimulatorOptions;
 
@@ -40,6 +41,7 @@ class CoralNPUV2SimulatorPy {
   void Wait();
   int Step(const int num_steps);
   uint64_t GetCycleCount();
+  uint64_t ReadRegister(const std::string& name);
   py::array_t<uint8_t> ReadMemory(uint64_t address, size_t length);
   void WriteMemory(uint64_t address, py::array_t<uint8_t> input_buffer,
                    size_t length);
@@ -77,7 +79,6 @@ void CoralNPUV2SimulatorPy::Wait() {
 }
 
 int CoralNPUV2SimulatorPy::Step(const int num_steps) {
-  LOG(INFO) << "Attempting to simulates steps";
   absl::StatusOr<int> count_status = sim_.Step(num_steps);
   if (!count_status.ok()) {
     LOG(ERROR) << "Step failed: " << count_status;
@@ -92,6 +93,14 @@ uint64_t CoralNPUV2SimulatorPy::GetCycleCount() {
     return cycle_count;
   }
   return 0;
+}
+
+uint64_t CoralNPUV2SimulatorPy::ReadRegister(const std::string& name) {
+  absl::StatusOr<uint64_t> word_status = sim_.ReadRegister(name);
+  if (!word_status.ok()) {
+    LOG(ERROR) << "ReadRegister failed: " << word_status;
+  }
+  return word_status.value();
 }
 
 void CoralNPUV2SimulatorPy::WriteMemory(uint64_t address,
@@ -117,7 +126,8 @@ py::array_t<uint8_t> CoralNPUV2SimulatorPy::ReadMemory(uint64_t address,
   py::buffer_info info = result.request();
   void* buffer_ptr = info.ptr;
 
-  absl::StatusOr<size_t> read_status = sim_.ReadMemory(address, buffer_ptr, length);
+  absl::StatusOr<size_t> read_status =
+      sim_.ReadMemory(address, buffer_ptr, length);
   if (!read_status.ok()) {
     LOG(ERROR) << "Read memory failed: " << read_status.status();
   } else if (read_status.value() != length) {
@@ -134,8 +144,22 @@ CoralNPUV2SimulatorPy::CoralNPUV2SimulatorPy(
 PYBIND11_MODULE(coralnpu_v2_sim_pybind, module) {
   module.doc() =
       "This module is created with pybind wrap on coralnpu-v2-simulator";
+  py::class_<CoralNPUV2LsuAccessRange>(module, "CoralNPUV2LsuAccessRange")
+      .def(py::init<>())
+      .def_readwrite("start_address", &CoralNPUV2LsuAccessRange::start_address)
+      .def_readwrite("length", &CoralNPUV2LsuAccessRange::length);
+
   py::class_<CoralNPUV2SimulatorOptions>(module, "CoralNPUV2SimulatorOptions")
-      .def(py::init<>());
+      .def(py::init<>())
+      .def_readwrite("itcm_start_address",
+                     &CoralNPUV2SimulatorOptions::itcm_start_address)
+      .def_readwrite("itcm_length", &CoralNPUV2SimulatorOptions::itcm_length)
+      .def_readwrite("initial_misa_value",
+                     &CoralNPUV2SimulatorOptions::initial_misa_value)
+      .def_readwrite("lsu_access_ranges",
+                     &CoralNPUV2SimulatorOptions::lsu_access_ranges)
+      .def_readwrite("exit_on_ebreak",
+                     &CoralNPUV2SimulatorOptions::exit_on_ebreak);
 
   py::class_<CoralNPUV2SimulatorPy>(module, "CoralNPUV2SimulatorPy")
       .def(py::init<const CoralNPUV2SimulatorOptions>())
@@ -150,6 +174,7 @@ PYBIND11_MODULE(coralnpu_v2_sim_pybind, module) {
            "Return number of cycles taken by program to run")
       .def("ReadMemory", &CoralNPUV2SimulatorPy::ReadMemory,
            "Reads memory and stores in the given buffer")
-      .def("WriteMemory", &CoralNPUV2SimulatorPy::WriteMemory,
-           "Write memory");
+      .def("WriteMemory", &CoralNPUV2SimulatorPy::WriteMemory, "Write memory")
+      .def("ReadRegister", &CoralNPUV2SimulatorPy::ReadRegister,
+           "Read Register and returns the value in it");
 }

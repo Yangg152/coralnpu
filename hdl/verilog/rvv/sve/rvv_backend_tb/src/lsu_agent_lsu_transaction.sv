@@ -25,6 +25,7 @@ class lsu_transaction extends uvm_sequence_item;
   bit   data_vreg_valid;
   int   data_vreg_idx;
   eew_e data_vreg_eew;
+  real  data_vreg_emul;
   int   data_vreg_byte_head;
   int   data_vreg_byte_tail;
 
@@ -32,6 +33,7 @@ class lsu_transaction extends uvm_sequence_item;
   bit   vidx_vreg_valid;
   int   vidx_vreg_idx;
   eew_e vidx_vreg_eew;
+  real  vidx_vreg_emul;
   int   vidx_vreg_byte_head;
   int   vidx_vreg_byte_tail;
 
@@ -82,6 +84,7 @@ class lsu_transaction extends uvm_sequence_item;
 
     `uvm_field_int(data_vreg_idx,UVM_ALL_ON)
     `uvm_field_enum(eew_e,data_vreg_eew,UVM_ALL_ON)
+    `uvm_field_real(data_vreg_emul,UVM_ALL_ON)
     `uvm_field_int(data_vreg_byte_head,UVM_ALL_ON)
     `uvm_field_int(data_vreg_byte_tail,UVM_ALL_ON)
     `uvm_field_int(data_vreg_valid,UVM_ALL_ON)
@@ -89,6 +92,7 @@ class lsu_transaction extends uvm_sequence_item;
     if(is_indexed) begin
       `uvm_field_int(vidx_vreg_idx  ,UVM_ALL_ON)
       `uvm_field_enum(eew_e, vidx_vreg_eew,UVM_ALL_ON)
+      `uvm_field_real(vidx_vreg_emul,UVM_ALL_ON)
       `uvm_field_int(vidx_vreg_byte_head,UVM_ALL_ON)
       `uvm_field_int(vidx_vreg_byte_tail,UVM_ALL_ON)
       `uvm_field_int(vidx_vreg_valid,UVM_ALL_ON)

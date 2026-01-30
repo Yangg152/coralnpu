@@ -42,6 +42,7 @@ coralnpu_v2_binary(
         "@tflite_micro//tensorflow/lite/micro:op_resolvers",
         "@tflite_micro//tensorflow/lite/micro:system_setup",
     ],
+    visibility = ["//visibility:public"]
 )
 
 generate_cc_arrays(
@@ -73,7 +74,7 @@ cocotb_test_suite(
     tests_kwargs = {
         "waves": False,
         "tags" : ["manual"],
-        "hdl_toplevel": "RvvCoreMini_ITCM1024KB_DTCM1024KBAxi",
+        "hdl_toplevel": "RvvCoreMiniHighmemAxi",
         "seed": "42",
         "size": "enormous",
         "test_module": ["cocotb_run_mobilenet_v1.py"],
@@ -97,7 +98,8 @@ cocotb_test_suite(
 coralnpu_v2_binary(
     name = "depthwise_conv_test",
     srcs = ["depthwise_conv_test.cc"],
-    linker_script = "@coralnpu_hw//toolchain:coralnpu_tcm_highmem.ld",
+    itcm_size_kbytes = 1024,  # Highmem
+    dtcm_size_kbytes = 1024,  # Highmem
     deps = [
         "//sw/opt/litert-micro:depthwise_conv",
         "@tflite_micro//tensorflow/lite/kernels/internal:reference_base"
@@ -143,7 +145,6 @@ cocotb_test_suite(
     vcs_verilog_sources = ["//hdl/chisel/src/coralnpu:rvv_core_mini_highmem_axi_cc_library_verilog"],
     verilator_model = "//tests/cocotb:rvv_core_mini_highmem_axi_model",
 )
-
 # 1. 生成新模型的 C++ 数组文件
 # 把 mobilenet_v1_025_128_quant.tflite 下载到了 models/ 目录下
 generate_cc_arrays(

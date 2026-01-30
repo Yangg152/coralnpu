@@ -66,6 +66,7 @@ class RvvCoreIO(p: Parameters) extends Bundle {
     // Execute cycle.
     val rs = Vec(p.instructionLanes * 2, Flipped(new RegfileReadDataIO))
     val rd = Vec(p.instructionLanes, Valid(new RegfileWriteDataIO))
+    val frs = Vec(p.instructionLanes, Input(UInt(32.W)))
 
     val rvv2lsu = Vec(2, Decoupled(new Rvv2Lsu(p)))
     val lsu2rvv = Vec(2, Flipped(Decoupled(new Lsu2Rvv(p))))
@@ -75,6 +76,7 @@ class RvvCoreIO(p: Parameters) extends Bundle {
 
     // Async scalar regfile writes.
     val async_rd = Decoupled(new RegfileWriteDataIO)
+    val async_frd = Decoupled(new RegfileWriteDataIO)
 
     // Async trap.
     val trap = Output(Valid(new RvvCompressedInstruction))
@@ -105,6 +107,7 @@ class RvvCsrIO(p: Parameters) extends Bundle {
   val vstart = Output(UInt(log2Ceil(p.rvvVlen).W))
   val vxrm = Output(UInt(2.W))
   val vxsat = Output(Bool())
+  val frm = Input(UInt(3.W))
   val vstart_write = Input(Valid(UInt(log2Ceil(p.rvvVlen).W)))
   val vxrm_write = Input(Valid(UInt(2.W)))
   val vxsat_write = Input(Valid(Bool()))

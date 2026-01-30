@@ -243,3 +243,21 @@ def coralnpu_deps():
             "https://github.com/accellera-official/systemc/archive/refs/tags/2.3.4.tar.gz",
         ],
     )
+
+    http_archive(
+        name = "riscv_isa_sim",
+        build_file = "@coralnpu_hw//third_party:spike.BUILD",
+        sha256 = "850f3c736f98536e306b7cf070b07996fb557014e2150353ec0118efac14674d",
+        strip_prefix = "riscv-isa-sim-fd72ee2d3e0d1703451c446d467387ff0576e492",
+        patches = [
+            "@coralnpu_hw//third_party/spike:0001-Add-mpause.patch",
+            "@coralnpu_hw//third_party/spike:0002-Coral-Deviations.patch",
+            "@coralnpu_hw//third_party/spike:0003-Dump-GPRs-on-EBREAK.patch",
+            "@coralnpu_hw//third_party/spike:0004-Add-custom-CoralNPU-CSRs-and-update-MVENDORID-MARCHI.patch",
+            "@coralnpu_hw//third_party/spike:0005-Force-logging-in-vcompress.patch",
+        ],
+        patch_args = ["-p1"],
+        urls = [
+            "https://github.com/riscv-software-src/riscv-isa-sim/archive/fd72ee2d3e0d1703451c446d467387ff0576e492.tar.gz",
+        ],
+    )

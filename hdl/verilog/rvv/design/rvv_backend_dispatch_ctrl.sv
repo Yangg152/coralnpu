@@ -126,30 +126,28 @@ module rvv_backend_dispatch_ctrl
             end
         end
         for (i=0; i<`NUM_DP_UOP; i++) begin: gen_ctrl_output
-            assign uop_ready_dp2uop[i] = uop_valid[i]        &
-                                         uop_ready_rob2dp[i] &
-                                         rs_ready[i]         ;
+            assign uop_ready_dp2uop[i]     = uop_valid[i]        &
+                                             uop_ready_rob2dp[i] &
+                                             rs_ready[i]         ;
 
-            // CMP&RDT instruction update vd in the last uop.
-            always_comb begin
-              case (uop_ctrl[i].uop_exe_unit)
-                CMP,
-                RDT: uop_valid_dp2rob[i] = uop_ctrl[i].last_uop_valid ? uop_ready_dp2uop[i] : 1'b0;
-                default: uop_valid_dp2rob[i] = uop_ready_dp2uop[i];
-              endcase
-            end
+            assign uop_valid_dp2rob[i]     = uop_ready_dp2uop[i] & 
+                                             uop_ctrl[i].pshrob_valid;
 
-            assign rs_valid_dp2alu[i]    = uop_ready_dp2uop[i] & 
-                                           (uop_ctrl[i].uop_exe_unit == ALU);
-            assign rs_valid_dp2pmtrdt[i] = uop_ready_dp2uop[i] & 
-                                           ((uop_ctrl[i].uop_exe_unit == PMT) || (uop_ctrl[i].uop_exe_unit == RDT) || (uop_ctrl[i].uop_exe_unit == CMP));
-            assign rs_valid_dp2mul[i]    = uop_ready_dp2uop[i] & 
-                                           (uop_ctrl[i].uop_exe_unit == MUL || uop_ctrl[i].uop_exe_unit == MAC);
-            assign rs_valid_dp2div[i]    = uop_ready_dp2uop[i] & 
-                                           (uop_ctrl[i].uop_exe_unit == DIV);
-            assign rs_valid_dp2lsu[i]    = uop_ready_dp2uop[i] & 
-                                           (uop_ctrl[i].uop_exe_unit == LSU);
-            assign mapinfo_valid_dp2lsu[i] = rs_valid_dp2lsu[i]; 
+            assign rs_valid_dp2alu[i]      = uop_ready_dp2uop[i] & 
+                                             (uop_ctrl[i].uop_exe_unit == ALU);
+            assign rs_valid_dp2pmtrdt[i]   = uop_ready_dp2uop[i] & 
+                                             ((uop_ctrl[i].uop_exe_unit == PMT) || 
+                                              (uop_ctrl[i].uop_exe_unit == RDT) || 
+                                              (uop_ctrl[i].uop_exe_unit == CMP) );
+            assign rs_valid_dp2mul[i]      = uop_ready_dp2uop[i] & 
+                                             (uop_ctrl[i].uop_exe_unit == MUL || 
+                                              uop_ctrl[i].uop_exe_unit == MAC );
+            assign rs_valid_dp2div[i]      = uop_ready_dp2uop[i] & 
+                                             (uop_ctrl[i].uop_exe_unit == DIV);
+            assign rs_valid_dp2lsu[i]      = uop_ready_dp2uop[i] & 
+                                             (uop_ctrl[i].uop_exe_unit == LSU);
+            assign mapinfo_valid_dp2lsu[i] = uop_valid_dp2rob[i] & 
+                                             (uop_ctrl[i].uop_exe_unit == LSU);
         end
     endgenerate
     

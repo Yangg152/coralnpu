@@ -267,7 +267,7 @@ def mpact_repos():
 
     http_archive(
         name = "coralnpu_mpact",
-        urls = ["https://github.com/google-coral/coralnpu-mpact/archive/d1a44cf4eb33640d624bb9373ae0637735818e38.tar.gz"],
-        sha256 = "b99ad59ae8712d4d87d61a02aa40e456b87ae0e664f2b47b7718ae1a6b9c9671",
-        strip_prefix = "coralnpu-mpact-d1a44cf4eb33640d624bb9373ae0637735818e38",
+        urls = ["https://github.com/google-coral/coralnpu-mpact/archive/430a8d14ad766388ef546a6449bf3a14b3b3f233.tar.gz"],
+        sha256 = "c9a38cfcba293398fc18c2b735b1831ebc99315184667c87f4d995f4933b2814",
+        strip_prefix = "coralnpu-mpact-430a8d14ad766388ef546a6449bf3a14b3b3f233",
     )

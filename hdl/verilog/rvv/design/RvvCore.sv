@@ -26,6 +26,7 @@ module RvvCore #(parameter N = 4,
   input logic [`VSTART_WIDTH-1:0] vstart,
   input logic [1:0] vxrm,
   input logic vxsat,
+  input logic [2:0] frm,
 
   // Instruction input.
   input logic [N-1:0] inst_valid,
@@ -35,6 +36,9 @@ module RvvCore #(parameter N = 4,
   // Register file input
   input logic [(2*N)-1:0] reg_read_valid,
   input RegDataT [(2*N)-1:0] reg_read_data,
+
+  // Floating point register file input
+  input RegDataT [N-1:0] freg_read_data,
 
   // Scalar Regfile writeback for configuration functions.
   output logic [N-1:0] reg_write_valid,
@@ -46,6 +50,12 @@ module RvvCore #(parameter N = 4,
   output RegAddrT async_rd_addr,
   output RegDataT async_rd_data,
   input logic async_rd_ready,
+
+  // Floating Point Regfile writeback.
+  output logic async_frd_valid,
+  output RegAddrT async_frd_addr,
+  output RegDataT async_frd_data,
+  input logic async_frd_ready,
 
   // RVV to LSU
   output  logic     [`NUM_LSU-1:0] uop_lsu_valid_rvv2lsu,
@@ -95,6 +105,7 @@ module RvvCore #(parameter N = 4,
       .vstart_i(vstart),
       .vxrm_i(vxrm),
       .vxsat_i(vxsat),
+      .frm_i(frm),
       .inst_valid_i(inst_valid),
       .inst_data_i(inst_data),
       .inst_ready_o(inst_ready),
@@ -193,6 +204,11 @@ module RvvCore #(parameter N = 4,
   always_comb begin
     trap_valid_rvs2rvv = 0;
   end
+
+  // Tie-off floating point writeback until implemented.
+  assign async_frd_valid = 0;
+  assign async_frd_addr = 0;
+  assign async_frd_data = 0;
 
   ROB2RT_t [`NUM_RT_UOP-1:0] rd_rob2rt;
   assign rd_rob2rt_o = rd_rob2rt;

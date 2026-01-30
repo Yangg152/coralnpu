@@ -845,6 +845,9 @@ class rvs_transaction extends uvm_sequence_item;
         
       } // ALU
       
+      // Ch 32.7.8, Ch 32.32.7.8.3
+      // EMUL * NFIELDS <= 8 constriant.
+      // NOTE: This constraint, or NFIELDS concept, is only applied to data_emul.
       if(inst_type inside {LD, ST}) {
         if(!(lsu_mop == LSU_US && src2_idx inside {MASK, WHOLE_REG})) {
           // lsu_eew:sew = 1:1
@@ -854,6 +857,7 @@ class rvs_transaction extends uvm_sequence_item;
             (vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2, LMUL4, LMUL8});
             //emul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2, LMUL4, LMUL8};
             if(lsu_mop inside {LSU_OI, LSU_UI}) {
+              // use vlmul as data_emul
               (lsu_nf == NF1) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2, LMUL4, LMUL8});
               (lsu_nf == NF2) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2, LMUL4       });
               (lsu_nf == NF3) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2              });
@@ -863,6 +867,7 @@ class rvs_transaction extends uvm_sequence_item;
               (lsu_nf == NF7) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     });
               (lsu_nf == NF8) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     });
             } else {
+              // use emul as data_emul
               (lsu_nf == NF1) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2, LMUL4, LMUL8});
               (lsu_nf == NF2) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2, LMUL4       });
               (lsu_nf == NF3) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2              });
@@ -879,6 +884,7 @@ class rvs_transaction extends uvm_sequence_item;
             (vlmul inside {LMUL1_2, LMUL1,   LMUL2, LMUL4, LMUL8});
             //emul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2, LMUL4};
             if(lsu_mop inside {LSU_OI, LSU_UI}) {
+              // use vlmul as data_emul
               (lsu_nf == NF1) -> (vlmul inside {         LMUL1_2, LMUL1, LMUL2, LMUL4, LMUL8});
               (lsu_nf == NF2) -> (vlmul inside {         LMUL1_2, LMUL1, LMUL2, LMUL4       });
               (lsu_nf == NF3) -> (vlmul inside {         LMUL1_2, LMUL1, LMUL2              });
@@ -888,6 +894,7 @@ class rvs_transaction extends uvm_sequence_item;
               (lsu_nf == NF7) -> (vlmul inside {         LMUL1_2, LMUL1                     });
               (lsu_nf == NF8) -> (vlmul inside {         LMUL1_2, LMUL1                     });
             } else {
+              // use emul as data_emul
               (lsu_nf == NF1) -> (vlmul inside {         LMUL1_2, LMUL1, LMUL2, LMUL4, LMUL8});
               (lsu_nf == NF2) -> (vlmul inside {         LMUL1_2, LMUL1, LMUL2, LMUL4, LMUL8});
               (lsu_nf == NF3) -> (vlmul inside {         LMUL1_2, LMUL1, LMUL2, LMUL4       });
@@ -903,6 +910,7 @@ class rvs_transaction extends uvm_sequence_item;
             (vlmul inside {LMUL1,   LMUL2,   LMUL4, LMUL8});
             //emul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2};
             if(lsu_mop inside {LSU_OI, LSU_UI}) {
+              // use vlmul as data_emul
               (lsu_nf == NF1) -> (vlmul inside {                  LMUL1, LMUL2, LMUL4, LMUL8});
               (lsu_nf == NF2) -> (vlmul inside {                  LMUL1, LMUL2, LMUL4       });
               (lsu_nf == NF3) -> (vlmul inside {                  LMUL1, LMUL2              });
@@ -912,6 +920,7 @@ class rvs_transaction extends uvm_sequence_item;
               (lsu_nf == NF7) -> (vlmul inside {                  LMUL1                     });
               (lsu_nf == NF8) -> (vlmul inside {                  LMUL1                     });
             } else {
+              // use emul as data_emul
               (lsu_nf == NF1) -> (vlmul inside {                  LMUL1, LMUL2, LMUL4, LMUL8});
               (lsu_nf == NF2) -> (vlmul inside {                  LMUL1, LMUL2, LMUL4, LMUL8});
               (lsu_nf == NF3) -> (vlmul inside {                  LMUL1, LMUL2, LMUL4, LMUL8});
@@ -929,15 +938,17 @@ class rvs_transaction extends uvm_sequence_item;
             (vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2, LMUL4});
             //emul inside {LMUL1_2, LMUL1,   LMUL2, LMUL4, LMUL8};
             if(lsu_mop inside {LSU_OI, LSU_UI}) {
+              // use vlmul as data_emul
               (lsu_nf == NF1) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2, LMUL4       });
-              (lsu_nf == NF2) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2              });
-              (lsu_nf == NF3) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     });
-              (lsu_nf == NF4) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     });
-              (lsu_nf == NF5) -> (vlmul inside {LMUL1_4, LMUL1_2                            });
-              (lsu_nf == NF6) -> (vlmul inside {LMUL1_4, LMUL1_2                            });
-              (lsu_nf == NF7) -> (vlmul inside {LMUL1_4, LMUL1_2                            });
-              (lsu_nf == NF8) -> (vlmul inside {LMUL1_4, LMUL1_2                            });
+              (lsu_nf == NF2) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2, LMUL4       });
+              (lsu_nf == NF3) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2              });
+              (lsu_nf == NF4) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2              });
+              (lsu_nf == NF5) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     });
+              (lsu_nf == NF6) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     });
+              (lsu_nf == NF7) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     });
+              (lsu_nf == NF8) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     });
             } else {
+              // use emul as data_emul
               (lsu_nf == NF1) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2, LMUL4       });
               (lsu_nf == NF2) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2              });
               (lsu_nf == NF3) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     });
@@ -954,15 +965,17 @@ class rvs_transaction extends uvm_sequence_item;
             (vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2});
             //emul inside {LMUL1,   LMUL2,   LMUL4, LMUL8};
             if(lsu_mop inside {LSU_OI, LSU_UI}) {
+              // use vlmul as data_emul
               (lsu_nf == NF1) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2              });
-              (lsu_nf == NF2) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     });
-              (lsu_nf == NF3) -> (vlmul inside {LMUL1_4, LMUL1_2                            });
-              (lsu_nf == NF4) -> (vlmul inside {LMUL1_4, LMUL1_2                            });
-              (lsu_nf == NF5) -> (vlmul inside {LMUL1_4                                     });
-              (lsu_nf == NF6) -> (vlmul inside {LMUL1_4                                     });
-              (lsu_nf == NF7) -> (vlmul inside {LMUL1_4                                     });
-              (lsu_nf == NF8) -> (vlmul inside {LMUL1_4                                     });
+              (lsu_nf == NF2) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2              });
+              (lsu_nf == NF3) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2              });
+              (lsu_nf == NF4) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2              });
+              (lsu_nf == NF5) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     });
+              (lsu_nf == NF6) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     });
+              (lsu_nf == NF7) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     });
+              (lsu_nf == NF8) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     });
             } else {
+              // use emul as data_emul
               (lsu_nf == NF1) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2              });
               (lsu_nf == NF2) -> (vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     });
               (lsu_nf == NF3) -> (vlmul inside {LMUL1_4, LMUL1_2                            });
@@ -1179,6 +1192,7 @@ class rvs_transaction extends uvm_sequence_item;
   extern protected function void overlap_unalign_correct();
   extern function bit reserve_inst_check();
   extern protected function void asm_string_gen();
+  extern function bit compare_inst(ref rvs_transaction inst);
 
 endclass: rvs_transaction
 
@@ -2344,6 +2358,9 @@ function bit rvs_transaction::reserve_inst_check();
     end
   end
 
+  // Ch 32.7.8, Ch 32.32.7.8.3
+  // EMUL * NFIELDS <= 8 constriant.
+  // NOTE: This constraint, or NFIELDS concept, is only applied to data_emul.
   if(inst_type inside {LD, ST} && !(lsu_mop == LSU_US && src2_idx inside {MASK, WHOLE_REG})) begin
     // lsu_eew:sew = 1:1
     if(lsu_width == LSU_8BIT  && vsew == SEW8  ||
@@ -2476,13 +2493,13 @@ function bit rvs_transaction::reserve_inst_check();
       //emul inside {LMUL1_2, LMUL1,   LMUL2, LMUL4, LMUL8};
       if(lsu_mop inside {LSU_OI, LSU_UI}) begin
         if((lsu_nf == NF1) && !(vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2, LMUL4       }) ||
-           (lsu_nf == NF2) && !(vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2              }) ||
-           (lsu_nf == NF3) && !(vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     }) ||
-           (lsu_nf == NF4) && !(vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     }) ||
-           (lsu_nf == NF5) && !(vlmul inside {LMUL1_4, LMUL1_2                            }) ||
-           (lsu_nf == NF6) && !(vlmul inside {LMUL1_4, LMUL1_2                            }) ||
-           (lsu_nf == NF7) && !(vlmul inside {LMUL1_4, LMUL1_2                            }) ||
-           (lsu_nf == NF8) && !(vlmul inside {LMUL1_4, LMUL1_2                            }) 
+           (lsu_nf == NF2) && !(vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2, LMUL4       }) ||
+           (lsu_nf == NF3) && !(vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2              }) ||
+           (lsu_nf == NF4) && !(vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2              }) ||
+           (lsu_nf == NF5) && !(vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     }) ||
+           (lsu_nf == NF6) && !(vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     }) ||
+           (lsu_nf == NF7) && !(vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     }) ||
+           (lsu_nf == NF8) && !(vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     }) 
         ) begin
           `uvm_warning("TR/INST_CHECK", 
                        $sformatf("pc=0x%8x: lsu_nf == %s, vlmul == %s, vsew == %s, lsu_width == %s is reserved.", 
@@ -2515,13 +2532,13 @@ function bit rvs_transaction::reserve_inst_check();
       //emul inside {LMUL1,   LMUL2,   LMUL4, LMUL8};
       if(lsu_mop inside {LSU_OI, LSU_UI}) begin
         if((lsu_nf == NF1) && !(vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2              }) ||
-           (lsu_nf == NF2) && !(vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     }) ||
-           (lsu_nf == NF3) && !(vlmul inside {LMUL1_4, LMUL1_2                            }) ||
-           (lsu_nf == NF4) && !(vlmul inside {LMUL1_4, LMUL1_2                            }) ||
-           (lsu_nf == NF5) && !(vlmul inside {LMUL1_4                                     }) ||
-           (lsu_nf == NF6) && !(vlmul inside {LMUL1_4                                     }) ||
-           (lsu_nf == NF7) && !(vlmul inside {LMUL1_4                                     }) ||
-           (lsu_nf == NF8) && !(vlmul inside {LMUL1_4                                     }) 
+           (lsu_nf == NF2) && !(vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2              }) ||
+           (lsu_nf == NF3) && !(vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2              }) ||
+           (lsu_nf == NF4) && !(vlmul inside {LMUL1_4, LMUL1_2, LMUL1, LMUL2              }) ||
+           (lsu_nf == NF5) && !(vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     }) ||
+           (lsu_nf == NF6) && !(vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     }) ||
+           (lsu_nf == NF7) && !(vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     }) ||
+           (lsu_nf == NF8) && !(vlmul inside {LMUL1_4, LMUL1_2, LMUL1                     }) 
         ) begin
           `uvm_warning("TR/INST_CHECK", 
                        $sformatf("pc=0x%8x: lsu_nf == %s, vlmul == %s, vsew == %s, lsu_width == %s is reserved.", 
@@ -2709,20 +2726,20 @@ function void rvs_transaction::asm_string_gen();
   // Inst name
   case(inst_type)
     LD, ST: begin
-      inst = this.lsu_inst.name();
+      if(inst_type == LD) begin
+        inst = "vl";
+      end
+      if(inst_type == ST) begin
+        inst = "vs";
+      end
       case(lsu_mop)
         LSU_US   : begin
           case(lsu_umop)
             MASK: begin
-              inst = this.lsu_inst.name();
+              inst = $sformatf("%sm", inst);
             end
             WHOLE_REG: begin
-              if(inst_type == LD) begin
-                inst = $sformatf("vl%0dre%0d", lsu_nf+1, lsu_eew);
-              end
-              if(inst_type == ST) begin
-                inst = $sformatf("vs%0dre%0d", lsu_nf+1, lsu_eew);
-              end
+              inst = $sformatf("%s%0dre%0d", inst, lsu_nf+1, lsu_eew);
             end
             default: begin
               if(this.lsu_nf == NF1) begin
@@ -2740,12 +2757,18 @@ function void rvs_transaction::asm_string_gen();
             inst = $sformatf("%sseg%0de%0d", inst, lsu_nf+1, lsu_eew);
           end
         end
-        LSU_UI, 
+        LSU_UI: begin
+          if(this.lsu_nf == NF1) begin
+            inst = $sformatf("%suxei%0d", inst, lsu_eew);
+          end else begin
+            inst = $sformatf("%suxseg%0dei%0d", inst, lsu_nf+1, lsu_eew);
+          end
+        end       
         LSU_OI: begin
           if(this.lsu_nf == NF1) begin
-            inst = $sformatf("%sei%0d", inst, lsu_eew);
+            inst = $sformatf("%soxei%0d", inst, lsu_eew);
           end else begin
-            inst = $sformatf("%sseg%0dei%0d", inst, lsu_nf+1, lsu_eew);
+            inst = $sformatf("%soxseg%0dei%0d", inst, lsu_nf+1, lsu_eew);
           end
         end      
       endcase
@@ -2945,4 +2968,37 @@ function void rvs_transaction::asm_string_gen();
     else
       this.asm_string = $sformatf("%s.%s %s, %s, %s, %s %s",inst, suff, dest, src2, src1, src0, comm);
 endfunction: asm_string_gen
+
+function bit rvs_transaction::compare_inst(ref rvs_transaction inst);
+  typedef enum bit {SAME = 1, DIFF = 0} __sta;
+  __sta same_vcsr, same_bin_inst, same_rs;
+  if(
+    this.vma === inst.vma &&
+    this.vta === inst.vta &&
+    this.vsew === inst.vsew &&
+    this.vlmul === inst.vlmul &&
+    this.vl === inst.vl &&
+    this.vstart === inst.vstart &&
+    this.vxrm === inst.vxrm
+  ) begin
+    same_vcsr = SAME;
+  end else begin
+    same_vcsr = DIFF;
+  end
+
+  if(this.bin_inst === inst.bin_inst) begin
+    same_bin_inst = SAME;
+  end else begin
+    same_bin_inst = DIFF;
+  end
+  
+  if(this.rs1_data === inst.rs1_data && this.rs2_data === inst.rs2_data) begin
+    same_rs = SAME;
+  end else begin
+    same_rs = DIFF;
+  end
+
+  return (same_vcsr && same_bin_inst && same_rs);
+    
+endfunction: compare_inst
 `endif // RVS_TRANSACTION__SV

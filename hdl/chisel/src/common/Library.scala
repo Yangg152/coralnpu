@@ -208,6 +208,12 @@ class LoopingCounter(w: Width) extends Bundle {
         _.curr -> Mux(isFull(), 0.U, curr + 1.U),
         _.max -> max,
     )
+
+    def reset(): LoopingCounter = MakeWireBundle[LoopingCounter](
+        new LoopingCounter(Width(max.getWidth)),
+        _.curr -> 0.U,
+        _.max -> max,
+    )
 }
 
 object LoopingCounter {

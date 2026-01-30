@@ -131,7 +131,7 @@ module rvv_backend_alu_unit_other
               end
             endcase
           end
-          VWXUNARY0: begin
+          VWRXUNARY0: begin
             // vmv.x.s
             result_valid = alu_uop_valid&vm&vs2_data_valid&(vs1_opcode==VMV_X_S);
           end
@@ -140,7 +140,7 @@ module rvv_backend_alu_unit_other
 
       OPMVX: begin
         case(uop_funct6.ari_funct6)
-          VWXUNARY0: begin
+          VWRXUNARY0: begin
             // vmv.s.x
             result_valid = alu_uop_valid&vm&rs1_data_valid;
           end
@@ -318,7 +318,7 @@ module rvv_backend_alu_unit_other
               end
             endcase
           end
-          VWXUNARY0: begin
+          VWRXUNARY0: begin
             // vmv.x.s
             if(vs1_opcode==VMV_X_S) begin
               case(vs2_eew)
@@ -339,7 +339,7 @@ module rvv_backend_alu_unit_other
 
       OPMVX: begin
         case(uop_funct6.ari_funct6)
-          VWXUNARY0: begin
+          VWRXUNARY0: begin
             // vmv.s.x
             case(vd_eew)
               EEW8: begin
@@ -490,14 +490,14 @@ module rvv_backend_alu_unit_other
           VXUNARY0: begin
             result_data = result_data_extend;
           end
-          VWXUNARY0: begin
+          VWRXUNARY0: begin
             result_data = src2_data;
           end
         endcase
       end
       OPMVX: begin
         case(uop_funct6.ari_funct6)
-          VWXUNARY0: begin
+          VWRXUNARY0: begin
             result_data = src1_data;
           end
         endcase

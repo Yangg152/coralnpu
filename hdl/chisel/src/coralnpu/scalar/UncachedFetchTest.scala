@@ -58,18 +58,29 @@ class FetchControlSpec extends AnyFreeSpec with ChiselSim {
       for (i <- 0 until dut.io.fetchData.bits.inst.length) {
         dut.io.fetchData.bits.inst(i).poke(i.U)
       }
+      dut.io.bufferRequest.nValid.expect(0.U)
       dut.io.fetchAddr.valid.expect(0)
       dut.clock.step()
+
+      // Resolve the branch
       dut.io.branch.valid.poke(false.B)
-      // We should initiate new fetch now, but old results should still be
-      // discarded.
       dut.io.bufferRequest.nValid.expect(0.U)
+      dut.clock.step()  // Temporary
+
+      // Initiate new fetch
+      dut.io.fetchData.valid.poke(false.B)
       dut.io.fetchAddr.valid.expect(1)
       dut.io.fetchAddr.bits.expect(0x30000000)
-      dut.io.fetchData.bits.addr.poke(0x30000000)
       dut.clock.step()
-      // Now we can accept results
+
+      // Handle fetch data
+      dut.io.fetchData.bits.addr.poke(0x30000000)
+      dut.io.fetchData.valid.poke(true.B)
       dut.io.bufferRequest.nValid.expect(8.U)
+      dut.clock.step()  // Temporary
+
+      // Initiate new fetch
+      dut.io.fetchData.valid.poke(false.B)
       dut.io.fetchAddr.valid.expect(1)
       dut.io.fetchAddr.bits.expect(0x30000020)
     }
@@ -87,6 +98,9 @@ class FetchControlSpec extends AnyFreeSpec with ChiselSim {
         dut.io.fetchData.bits.inst(i).poke(i.U)
       }
       dut.io.bufferRequest.nValid.expect(8.U)
+      dut.clock.step()  // Temporary
+
+      dut.io.fetchData.valid.poke(false.B)
       dut.io.fetchAddr.valid.expect(1)
       dut.io.fetchAddr.bits.expect(0x20000020)
     }
@@ -105,6 +119,9 @@ class FetchControlSpec extends AnyFreeSpec with ChiselSim {
       }
       dut.io.fetchData.bits.inst(3).poke("x0000006f".U)
       dut.io.bufferRequest.nValid.expect(4.U)
+      dut.clock.step()  // Temporary
+
+      dut.io.fetchData.valid.poke(false.B)
       dut.io.fetchAddr.valid.expect(1)
       dut.io.fetchAddr.bits.expect(0x2000000c)
     }

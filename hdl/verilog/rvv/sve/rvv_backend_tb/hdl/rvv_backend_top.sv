@@ -86,16 +86,14 @@ module rvv_backend_top();
   assign rvs_if.rt_uop      = rt_uop;
   assign rvs_if.rt_last_uop = rt_last_uop;
   
-
-  assign rvs_if.inst_correct[0] = `DECODE_PATH.pop_de2cq[0] &&  (|`DECODE_PATH.uop_valid_de2uq[0]);
-  assign rvs_if.inst_discard[0] = `DECODE_PATH.pop_de2cq[0] && !(|`DECODE_PATH.uop_valid_de2uq[0]);
   generate 
     genvar gv_i;
-    for(gv_i=1; gv_i<`NUM_DE_INST; gv_i++) begin
+    for(gv_i=0; gv_i<`NUM_DE_INST; gv_i++) begin
       assign rvs_if.inst_correct[gv_i] = `DECODE_PATH.pop_de2cq[gv_i] &&  (|`DECODE_PATH.uop_valid_de2uq[gv_i]);
       assign rvs_if.inst_discard[gv_i] = `DECODE_PATH.pop_de2cq[gv_i] && !(|`DECODE_PATH.uop_valid_de2uq[gv_i]);
     end
   endgenerate
+  assign rvs_if.inst_pkg_cq2de = `DECODE_PATH.inst_pkg_cq2de;
   
   // ROB dataout 
   assign rvs_if.rd_valid_rob2rt = DUT.rd_valid_rob2rt;

@@ -20,9 +20,23 @@ import numpy as np
 class CoralNPUV2Simulator:
   """Wrapper for CoralNPUV2SimulatorPy providing helper methods."""
 
-  def __init__(self):
+  def __init__(self, highmem_ld=False):
     self.options = coralnpu_v2_sim_pybind.CoralNPUV2SimulatorOptions()
+    if highmem_ld:
+      self.dtcm_range = self._create_lsu_range(0x100000, 0x100000)
+      self.extmem_range = self._create_lsu_range(0x20000000, 0x400000)
+      self.options.itcm_start_address = 0x0
+      self.options.itcm_length = 0x00100000
+      self.options.initial_misa_value = 0x40201120
+      self.options.lsu_access_ranges = [self.dtcm_range, self.extmem_range]
     self.sim = coralnpu_v2_sim_pybind.CoralNPUV2SimulatorPy(self.options)
+
+  def _create_lsu_range(self, start_address, length):
+    """Creates a CoralNPUV2LsuAccessRange object."""
+    lsu_range = coralnpu_v2_sim_pybind.CoralNPUV2LsuAccessRange()
+    lsu_range.start_address = start_address
+    lsu_range.length = length
+    return lsu_range
 
   def load_program(self, elf_path, entry_point=None):
     """Loads an ELF program.
@@ -52,6 +66,10 @@ class CoralNPUV2Simulator:
   def read_memory(self, address, length):
     """Reads memory and returns a numpy array of uint8."""
     return self.sim.ReadMemory(address, length)
+
+  def read_register(self, name):
+    """Reads a register and returns the hex value of it."""
+    return hex(self.sim.ReadRegister(name))
 
   def write_memory(self, address, data):
     """Writes data to memory. Data must be a numpy array."""

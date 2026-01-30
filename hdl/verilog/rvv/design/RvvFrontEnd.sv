@@ -31,6 +31,7 @@ module RvvFrontEnd#(parameter N = 4,
   input logic [`VSTART_WIDTH-1:0]     vstart_i,
   input logic [`VCSR_VXRM_WIDTH-1:0]  vxrm_i,
   input logic [`VCSR_VXSAT_WIDTH-1:0] vxsat_i,
+  input logic [2:0]                   frm_i,
 
   // Instruction input.
   input logic [N-1:0] inst_valid_i,
@@ -140,6 +141,9 @@ module RvvFrontEnd#(parameter N = 4,
     inst_config_state[0].vstart = vstart_i;
     inst_config_state[0].xrm = RVVXRM'(vxrm_i);
     inst_config_state[0].xsat = vxsat_i;
+`ifdef ZVE32F_ON
+    inst_config_state[0].frm = frm_i;
+`endif  // ZVE32F_ON
     for (int i = 0; i < N; i++) begin
       inst_config_state[i+1] = inst_config_state[i];
       avl[i] = 0;
@@ -327,6 +331,9 @@ module RvvFrontEnd#(parameter N = 4,
       config_state_q.ta <= 0;
       config_state_q.xrm <= RNU;
       config_state_q.xsat <= 0;
+`ifdef ZVE32F_ON
+      config_state_q.frm <= 0;
+`endif  // ZVE32F_ON
       config_state_q.sew <= SEW8;
       config_state_q.lmul <= LMUL1;
     end else begin

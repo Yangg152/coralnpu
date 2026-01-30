@@ -24,10 +24,12 @@
 #define RVTEST_RV32UF \
     .macro init;      \
     .endm
- #define RVTEST_CODE_BEGIN \
-   .option norelax;        \
-   .globl _start;          \
-   _start:
+#define RVTEST_CODE_BEGIN                     \
+  .option norelax;                            \
+  .globl _start;                              \
+  _start:                                     \
+    li      t0, 0x6600;                       \
+    csrrs   zero, mstatus, t0;
 
 
  #define RVTEST_CODE_END

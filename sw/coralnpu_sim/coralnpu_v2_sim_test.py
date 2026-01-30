@@ -93,6 +93,28 @@ class TestCoralNPUV2SimPybind(unittest.TestCase):
     with self.assertRaisesRegex(TypeError, "data must be a numpy array"):
       self.sim.write_memory(address, b"\x01\x02\x03")
 
+  def test_step(self):
+    """Verifies the step and get_cycle_count functionality."""
+    entry_point, _ = self.sim.get_elf_entry_and_symbol(self.elf_path, [])
+    self.sim.load_program(self.elf_path, entry_point)
+
+    steps = 10
+    actual_steps = self.sim.step(steps)
+    self.assertEqual(actual_steps, steps)
+
+    cycle_count = self.sim.get_cycle_count()
+    self.assertGreater(cycle_count, 0)
+
+  def test_read_register(self):
+    """Verifies reading a register."""
+    entry_point, _ = self.sim.get_elf_entry_and_symbol(self.elf_path, [])
+    self.sim.load_program(self.elf_path, entry_point)
+
+    pc_val_str = self.sim.read_register("pc")
+    self.assertTrue(isinstance(pc_val_str, str))
+    self.assertTrue(pc_val_str.startswith("0x"))
+    self.assertGreaterEqual(int(pc_val_str, 16), 0)
+
 
 if __name__ == "__main__":
   unittest.main()

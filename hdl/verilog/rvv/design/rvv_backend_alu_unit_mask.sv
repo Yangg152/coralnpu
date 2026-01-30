@@ -166,7 +166,7 @@ module rvv_backend_alu_unit_mask
             result_valid = alu_uop_valid&vs1_data_valid&vs2_data_valid&vm&vd_data_valid;
             alu_sub_opcode = OP_OTHER;
           end
-          VWXUNARY0: begin
+          VWRXUNARY0: begin
             case(vs1_opcode)
               VCPOP: begin
                 result_valid = alu_uop_valid&(vs1_data_valid==1'b0)&vs2_data_valid&((vm==1'b1)||((vm==1'b0)&v0_data_valid));
@@ -264,7 +264,7 @@ module rvv_backend_alu_unit_mask
             src2_data  = vs2_data;
             src1_data  = vs1_data;
           end
-          VWXUNARY0: begin
+          VWRXUNARY0: begin
             case(vs1_opcode)
               VCPOP: begin
                 if (vm==1'b1)
@@ -442,7 +442,7 @@ module rvv_backend_alu_unit_mask
           VMXNOR: begin
             result_data = result_data_xnor; 
           end
-          VWXUNARY0: begin
+          VWRXUNARY0: begin
             case(vs1_opcode)
               VFIRST: begin
                 result_data = result_data_vfirst;
@@ -542,7 +542,7 @@ module rvv_backend_alu_unit_mask
           VMXNOR: begin
             result.result_data = result_data&(~vstart_onehot_sub1) | vd_data&vstart_onehot_sub1;
           end
-          VWXUNARY0: begin
+          VWRXUNARY0: begin
             case(vs1_opcode)
               VFIRST: begin
                 result.result_data = result_data;

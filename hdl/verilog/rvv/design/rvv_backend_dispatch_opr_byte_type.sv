@@ -13,7 +13,7 @@ module rvv_backend_dispatch_opr_byte_type
 (
     operand_byte_type,
     uop_info,
-    v0_enable
+    v0_data
 );
 // ---parameter definition--------------------------------------------
     localparam VLENB_WIDTH = $clog2(`VLENB);
@@ -21,7 +21,7 @@ module rvv_backend_dispatch_opr_byte_type
 // ---port definition-------------------------------------------------
     output UOP_OPN_BYTE_TYPE_t operand_byte_type;
     input  UOP_INFO_t          uop_info;
-    input  logic [`VLEN-1:0]   v0_enable;
+    input  logic [`VLEN-1:0]   v0_data;
 
 // ---internal signal definition--------------------------------------
     EEW_e                               eew_max;
@@ -29,21 +29,29 @@ module rvv_backend_dispatch_opr_byte_type
     
     logic  [1:0]                        vs2_eew_shift;
     logic  [`VSTART_WIDTH-1:0]          uop_vs2_start;
-    logic  [`VLENB-1:0][`VL_WIDTH-1:0]  vs2_ele_index; // element index
+    logic  [`VSTART_WIDTH-1:0]          uop_vs2_offset;
+    logic  [`VLENB-1:0][`VL_WIDTH-1:0]  vs2_ele_index;  // element index
     logic  [`VLENB-1:0]                 vs2_enable, vs2_enable_tmp;
-
+    
+    logic  [`VSTART_WIDTH-1:0]          ele_start;      // the index of start element in this uop
     logic  [1:0]                        vd_eew_shift;
-    logic  [`VSTART_WIDTH-1:0]          uop_v0_start;
     logic  [`VSTART_WIDTH-1:0]          uop_vd_start;
     logic  [`VSTART_WIDTH-1:0]          uop_vd_end;
-    logic  [`VLENB-1:0][`VL_WIDTH-1:0]  vd_ele_index; // element index
-    logic  [`VLENB-1:0]                 vd_enable, vd_enable_tmp;
-    
+    logic  [`VLENB-1:0][`VL_WIDTH-1:0]  vd_ele_index;   // element index
+    logic  [`VLENB-1:0]                 vd_enable;
+
+    logic  [`VSTART_WIDTH-1:0]          uop_v0_start;
+    logic  [`VSTART_WIDTH-1:0]          uop_v0_start_offset;
+    logic  [`VSTART_WIDTH-1:0]          uop_v0_end;
+    logic  [`VSTART_WIDTH-1:0]          uop_v0_end_offset;
+    logic  [`VLENB-1:0]                 v0_enable, v0_enable_tmp;
+
     // result
     BYTE_TYPE_t                         vs2;
     BYTE_TYPE_t                         vd;
     logic [`VLENB-1:0]                  v0_strobe;
 
+    genvar i;
 // ---code start------------------------------------------------------
     // find eew_max and shift amount
     always_comb begin
@@ -69,8 +77,6 @@ module rvv_backend_dispatch_opr_byte_type
       end
     end
 
-    genvar i;
-
 // for vs2 byte type
     generate
         always_comb begin
@@ -83,10 +89,12 @@ module rvv_backend_dispatch_opr_byte_type
         end
 
         // for RDT instruction, eew_max == vs2_eew
+        assign uop_vs2_offset = (`VSTART_WIDTH)'(VLENB_WIDTH - vs2_eew_shift);
+
         always_comb begin
           case (uop_info.uop_exe_unit)
             RDT:begin
-              uop_vs2_start = (`VSTART_WIDTH)'(uop_info.uop_index) << (VLENB_WIDTH - vs2_eew_shift);
+              uop_vs2_start = (`VSTART_WIDTH)'(uop_info.uop_index) << uop_vs2_offset ;
             end
             default:begin
               case({eew_max,uop_info.vs2_eew})
@@ -94,16 +102,16 @@ module rvv_backend_dispatch_opr_byte_type
                 {EEW16,EEW16},
                 {EEW8,EEW8}: begin
                   // regular and narrowing instruction
-                  uop_vs2_start = (`VSTART_WIDTH)'(uop_info.uop_index) << (VLENB_WIDTH - vs2_eew_shift);
+                  uop_vs2_start = (`VSTART_WIDTH)'(uop_info.uop_index) << uop_vs2_offset;
                 end
                 {EEW32,EEW16},
                 {EEW16,EEW8}: begin
                   // widening instruction: EEW_vd:EEW_vs = 2:1
-                  uop_vs2_start = (`VSTART_WIDTH)'(uop_info.uop_index[`UOP_INDEX_WIDTH-1:1]) << (VLENB_WIDTH - vs2_eew_shift);
+                  uop_vs2_start = (`VSTART_WIDTH)'(uop_info.uop_index[`UOP_INDEX_WIDTH-1:1]) << uop_vs2_offset;
                 end
                 {EEW32,EEW8}: begin
                   // widening instruction: EEW_vd:EEW_vs = 4:1
-                  uop_vs2_start = (`VSTART_WIDTH)'(uop_info.uop_index[`UOP_INDEX_WIDTH-1:2]) << (VLENB_WIDTH - vs2_eew_shift);
+                  uop_vs2_start = (`VSTART_WIDTH)'(uop_info.uop_index[`UOP_INDEX_WIDTH-1:2]) << uop_vs2_offset;
                 end
                 default: begin
                   uop_vs2_start = 'b0;
@@ -113,7 +121,7 @@ module rvv_backend_dispatch_opr_byte_type
           endcase
         end
 
-        assign vs2_enable_tmp  = v0_enable[uop_vs2_start+:`VLENB]; 
+        assign vs2_enable_tmp  = v0_data[uop_vs2_start+:`VLENB]; 
 
         for (i=0; i<`VLENB; i++) begin : gen_vs2_byte_type
             // ele_index = uop_index * (VLEN/vs2_eew) + BYTE_INDEX[MSB:vs2_eew]
@@ -149,116 +157,128 @@ module rvv_backend_dispatch_opr_byte_type
             {EEW32,EEW32},
             {EEW16,EEW16},
             {EEW8,EEW8}: begin
-              uop_v0_start = (`VSTART_WIDTH)'(uop_info.uop_index) << (VLENB_WIDTH - vd_eew_shift);
-              uop_vd_start = uop_v0_start; 
-              uop_vd_end = uop_vd_start + (`VLENB >> eew_max_shift) - 1'b1;
+              ele_start           = (`VSTART_WIDTH)'(uop_info.uop_index) << (VLENB_WIDTH - vd_eew_shift);
+
+              uop_v0_start_offset = 'b0; 
+              uop_v0_end_offset   = (`VLENB >> vd_eew_shift) - 1'b1;
+              uop_v0_start        = ele_start;
+              uop_v0_end          = ele_start + uop_v0_end_offset;
+
+              uop_vd_start        = uop_v0_start;
+              uop_vd_end          = uop_v0_end;
             end
             {EEW32,EEW16},
             {EEW16,EEW8}: begin
               // narrowing instruction: EEW_vd:EEW_vs = 1:2
-              uop_v0_start = (`VSTART_WIDTH)'(uop_info.uop_index[`UOP_INDEX_WIDTH-1:1]) << (VLENB_WIDTH - vd_eew_shift);
-              uop_vd_start = uop_info.uop_index[0] ? uop_v0_start + (`VLENB >> eew_max_shift):
-                                                     uop_v0_start;
-              uop_vd_end = uop_vd_start + (`VLENB >> eew_max_shift) - 1'b1 ; 
+              ele_start           = (`VSTART_WIDTH)'(uop_info.uop_index[`UOP_INDEX_WIDTH-1:1] << (VLENB_WIDTH - vd_eew_shift));
+              
+              uop_v0_start_offset = uop_info.uop_index[0] ? (`VSTART_WIDTH)'(`VLENB >> eew_max_shift) : 'b0;
+              uop_v0_end_offset   = uop_info.uop_index[0] ? (`VLENB >> vd_eew_shift)-1'b1 : (`VLENB >> eew_max_shift)-1'b1; 
+              uop_v0_start        = ele_start + uop_v0_start_offset;
+              uop_v0_end          = ele_start + uop_v0_end_offset;
+
+              if (uop_info.uop_exe_unit==LSU) begin
+                // index load/store with EEW_vd(vs3):EEW_vs2 = 1:2
+                uop_vd_start      = ele_start;
+                uop_vd_end        = ele_start + (`VLENB >> vd_eew_shift) - 1'b1;
+              end
+              else begin
+                uop_vd_start      = uop_v0_start;
+                uop_vd_end        = uop_v0_end;
+              end
             end
             {EEW32,EEW8}: begin
               // narrowing instruction: EEW_vd:EEW_vs = 1:4
-              uop_v0_start = (`VSTART_WIDTH)'(uop_info.uop_index[`UOP_INDEX_WIDTH-1:2]) << VLENB_WIDTH;
+              ele_start = (`VSTART_WIDTH)'(uop_info.uop_index[`UOP_INDEX_WIDTH-1:2]) << VLENB_WIDTH;
+
               case(uop_info.uop_index[1:0])
                 2'd3: begin
-                  uop_vd_start = uop_v0_start + `VLENB*3/4;
+                  uop_v0_start_offset = `VLENB*3/4;
+                  uop_v0_end_offset   = `VLENB*4/4 - 1;
                 end
                 2'd2: begin
-                  uop_vd_start = uop_v0_start + `VLENB*2/4;
+                  uop_v0_start_offset = `VLENB*2/4;
+                  uop_v0_end_offset   = `VLENB*3/4 - 1;
                 end
                 2'd1: begin
-                  uop_vd_start = uop_v0_start + `VLENB*1/4;
+                  uop_v0_start_offset = `VLENB*1/4;
+                  uop_v0_end_offset   = `VLENB*2/4 - 1;
                 end
                 default: begin
-                  uop_vd_start = uop_v0_start;
+                  uop_v0_start_offset = 'b0;
+                  uop_v0_end_offset   = `VLENB*1/4 - 1;
                 end
               endcase
-              uop_vd_end = uop_vd_start + (`VLENB/4-1);
+              uop_v0_start = ele_start + uop_v0_start_offset;
+              uop_v0_end   = ele_start + uop_v0_end_offset;
+
+              if (uop_info.uop_exe_unit==LSU) begin
+                // index load/store with EEW_vd(vs3):EEW_vs2 = 1:4
+                uop_vd_start          = ele_start;
+                uop_vd_end            = ele_start + (`VLENB >> vd_eew_shift) - 1'b1;
+              end
+              else begin
+                uop_vd_start          = uop_v0_start;
+                uop_vd_end            = uop_v0_end;
+              end
             end
             default: begin  // {EEW1,EEW1}
-              uop_v0_start = 'b0; 
-              uop_vd_start = uop_info.vstart; 
-              uop_vd_end = uop_info.vl;
+              ele_start           = 'b0; 
+
+              uop_v0_start_offset = 'b0;
+              uop_v0_end_offset   = 'b0;
+              uop_v0_start        = uop_info.vstart; 
+              uop_v0_end          = uop_info.vl;
+
+              uop_vd_start        = uop_v0_start;
+              uop_vd_end          = uop_v0_end;
             end
           endcase
         end
 
-        assign vd_enable_tmp  = v0_enable[uop_v0_start+:`VLENB]; 
+        assign v0_enable_tmp = v0_data[ele_start+:`VLENB]; 
 
         for (i=0; i<`VLENB; i++) begin : gen_vd_byte_type
-          if (i==0) begin
-            // ele_index = uop_index * (VLEN/vd_eew) + BYTE_INDEX[MSB:vd_eew]
-            assign vd_enable[0] = uop_info.vm ? 1'b1 : vd_enable_tmp[0];
-            assign vd_ele_index[0] = (`VL_WIDTH)'(uop_v0_start);
+          // ele_index = uop_index * (VLEN/vd_eew) + BYTE_INDEX[MSB:vd_eew]
+          assign v0_enable[i] = uop_info.vm ? 1'b1 : v0_enable_tmp[i >> vd_eew_shift];
+          assign vd_enable[i] = v0_enable[i];
+          assign vd_ele_index[i] = (`VL_WIDTH)'(ele_start) + (i >> vd_eew_shift);
 
-            always_comb begin
-              v0_strobe[0] = 'b0;
-
-              case (uop_info.uop_exe_unit)
-                RDT:begin
-                  case(uop_info.vd_eew)
-                    EEW32:vd[0]   = BODY_ACTIVE;
-                    EEW16:vd[0]   = BODY_ACTIVE;
-                    default:vd[0] = BODY_ACTIVE;
-                  endcase
-                end
-                default:begin
-                  if (uop_info.ignore_vta&uop_info.ignore_vma)
-                      vd[0] = BODY_ACTIVE;       
-                  else if (vd_ele_index[0] >= uop_info.vl) 
-                      vd[0] = TAIL;       
-                  else if ((vd_ele_index[0] < {1'b0, uop_info.vstart})&(uop_info.vstart>=uop_vd_start)) 
-                      vd[0] = NOT_CHANGE;     // prestart
-                  else if (vd_ele_index[0] < {1'b0, uop_vd_start}) // &(uop_info.vstart<uop_vd_start)
-                      vd[0] = NOT_CHANGE;     // prestart
-                  else begin 
-                      vd[0] = (vd_enable[0] || uop_info.ignore_vma) ? BODY_ACTIVE
-                                                                                      : BODY_INACTIVE;
-                      v0_strobe[0] = vd_enable[0] || uop_info.ignore_vma;
-                  end
-                end
-              endcase
-            end
-          end else begin
-            // ele_index = uop_index * (VLEN/vd_eew) + BYTE_INDEX[MSB:vd_eew]
-            assign vd_enable[i] = uop_info.vm ? 1'b1 : vd_enable_tmp[i >> vd_eew_shift];
-            assign vd_ele_index[i] = (`VL_WIDTH)'(uop_v0_start) + (i >> vd_eew_shift);
-
-            always_comb begin
+          always_comb begin
+            if (uop_info.ignore_vta&uop_info.ignore_vma)
+              v0_strobe[i] = 'b1;
+            else if (vd_ele_index[i] >= uop_info.vl) 
               v0_strobe[i] = 'b0;
+            else if ((vd_ele_index[i] < {1'b0, uop_info.vstart})||(vd_ele_index[i] < {1'b0, uop_v0_start})) 
+              v0_strobe[i] = 'b0;
+            else if (vd_ele_index[i] > {1'b0, uop_v0_end}) 
+              v0_strobe[i] = 'b0;
+            else 
+              v0_strobe[i] = v0_enable[i] || uop_info.ignore_vma;
+          end
 
-              case (uop_info.uop_exe_unit)
-                RDT:begin
-                  case(uop_info.vd_eew)
-                    EEW32:vd[i] = i<4 ? BODY_ACTIVE : TAIL;
-                    EEW16:vd[i] = i<2 ? BODY_ACTIVE : TAIL;
-                    default:vd[i] = i<1 ? BODY_ACTIVE : TAIL;
-                  endcase
-                end
-                default:begin
-                  if (uop_info.ignore_vta&uop_info.ignore_vma)
-                      vd[i] = BODY_ACTIVE;       
-                  else if (vd_ele_index[i] >= uop_info.vl) 
-                      vd[i] = TAIL;       
-                  else if ((vd_ele_index[i] < {1'b0, uop_info.vstart})&(uop_info.vstart>=uop_vd_start)) 
-                      vd[i] = NOT_CHANGE;     // prestart
-                  else if (vd_ele_index[i] < {1'b0, uop_vd_start}) // &(uop_info.vstart<uop_vd_start)
-                      vd[i] = NOT_CHANGE;     // prestart
-                  else if (vd_ele_index[i] > {1'b0, uop_vd_end}) 
-                      vd[i] = BODY_INACTIVE;
-                  else begin 
-                      vd[i] = (vd_enable[i] || uop_info.ignore_vma) ? BODY_ACTIVE
-                                                                                      : BODY_INACTIVE;
-                      v0_strobe[i] = vd_enable[i] || uop_info.ignore_vma;
-                  end
-                end
-              endcase
-            end
+          always_comb begin
+            case (uop_info.uop_exe_unit)
+              RDT:begin
+                case(uop_info.vd_eew)
+                  EEW32:vd[i] = i<4 ? BODY_ACTIVE : TAIL;
+                  EEW16:vd[i] = i<2 ? BODY_ACTIVE : TAIL;
+                  default:vd[i] = i<1 ? BODY_ACTIVE : TAIL;
+                endcase
+              end
+              default:begin
+                if (uop_info.ignore_vta&uop_info.ignore_vma)
+                    vd[i] = BODY_ACTIVE;       
+                else if (vd_ele_index[i] >= uop_info.vl) 
+                    vd[i] = TAIL;       
+                else if ((vd_ele_index[i] < {1'b0, uop_info.vstart})||(vd_ele_index[i] < {1'b0, uop_vd_start})) 
+                    vd[i] = NOT_CHANGE;     // prestart
+                else if (vd_ele_index[i] > {1'b0, uop_vd_end}) 
+                    vd[i] = BODY_INACTIVE;
+                else 
+                    vd[i] = (vd_enable[i] || uop_info.ignore_vma) ? BODY_ACTIVE : BODY_INACTIVE;
+              end
+            endcase
           end
         end
     endgenerate

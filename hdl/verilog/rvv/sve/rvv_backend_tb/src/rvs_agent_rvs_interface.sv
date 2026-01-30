@@ -43,6 +43,7 @@ interface rvs_interface (input bit clk, ref logic rst_n);
 // decode result of inst
   logic         [`NUM_DE_INST-1:0] inst_correct;
   logic         [`NUM_DE_INST-1:0] inst_discard;
+  RVVCmd        [`NUM_DE_INST-1:0] inst_pkg_cq2de;
 
 // rvv idle
   logic         rvv_idle;

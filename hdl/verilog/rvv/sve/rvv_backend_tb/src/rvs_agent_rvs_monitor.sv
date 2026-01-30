@@ -201,47 +201,92 @@ task rvs_monitor::tx_monitor();
             `uvm_info(get_type_name(), $sformatf("MON discarded inst:\n%s", inst_tr.sprint()), UVM_HIGH)
           end
           temp_tr.copy(inst_tr);
-          inst_temp_queue.push_back(temp_tr);
+          `uvm_info(get_type_name(), $sformatf("Send transaction to inst_rx_queue:\n%s", inst_tr.sprint()), UVM_HIGH)
+          inst_rx_queue.push_back(temp_tr);
           ctrl_tr = temp_tr;
           this.total_inst++;
         end
       end
-      for(int i=0; i<`NUM_DE_INST; i++) begin
-        if(rvs_if.inst_correct[i]) begin
-          rt_tr = new("rt_tr");
-          rt_tr = inst_temp_queue.pop_front();
-          inst_rx_queue.push_back(rt_tr);
-          `uvm_info(get_type_name(), $sformatf("DUT will execute inst:\n%s",rt_tr.sprint()), UVM_HIGH)
-        end else if(rvs_if.inst_discard[i]) begin
-          rt_tr = new("rt_tr");
-          rt_tr = inst_temp_queue.pop_front();
-          `uvm_info(get_type_name(), $sformatf("DUT discarded inst:\n%s",rt_tr.sprint()), UVM_HIGH)
-        end
-      end
+      // for(int i=0; i<`NUM_DE_INST; i++) begin
+      //   if(rvs_if.inst_correct[i]) begin
+      //     rt_tr = new("rt_tr");
+      //     rt_tr = inst_temp_queue.pop_front();
+      //     inst_rx_queue.push_back(rt_tr);
+      //     `uvm_info(get_type_name(), $sformatf("DUT will execute inst:\n%s",rt_tr.sprint()), UVM_HIGH)
+      //   end else if(rvs_if.inst_discard[i]) begin
+      //     rt_tr = new("rt_tr");
+      //     rt_tr = inst_temp_queue.pop_front();
+      //     `uvm_info(get_type_name(), $sformatf("DUT discarded inst:\n%s",rt_tr.sprint()), UVM_HIGH)
+      //   end
+      // end
     end
   end
 endtask: tx_monitor
 
 task rvs_monitor::rx_monitor();
-  rvs_transaction tr;
+  rvs_transaction tr, inst_tr;
   logic [`VLENB-1:0] rt_vrf_byte_strobe;
   logic [`VLEN-1:0] rt_vrf_bit_strobe;
   bit vrf_overlap;
   bit ready_to_new_inst;
+  int uop_cnt = 0;
   tr = new("tr");
   forever begin
     @(posedge rvs_if.clk);
     if(~rvs_if.rst_n) begin
       ready_to_new_inst = 1;
+      uop_cnt = 0;
       inst_rx_queue.delete();
     end else begin
+      // Remove discarded inst from inst_rx_queue
+      for(int i=0; i<`NUM_DE_INST; i++) begin
+        if(rvs_if.inst_discard[i]) begin
+          logic [31:0] inst_32;
+          inst_tr = new("inst_tr");
+          inst_tr.constraint_mode(0);
+          inst_tr.set_config_state(
+            rvs_if.inst_pkg_cq2de[i].arch_state.ma,
+            rvs_if.inst_pkg_cq2de[i].arch_state.ta,
+            rvs_if.inst_pkg_cq2de[i].arch_state.sew,
+            rvs_if.inst_pkg_cq2de[i].arch_state.lmul,
+            rvs_if.inst_pkg_cq2de[i].arch_state.vl,
+            rvs_if.inst_pkg_cq2de[i].arch_state.vstart,
+            rvs_if.inst_pkg_cq2de[i].arch_state.xrm
+          );
+          inst_32[31:7] = rvs_if.inst_pkg_cq2de[i].bits;
+          case(rvs_if.inst_pkg_cq2de[i].opcode)
+            2'b00: inst_32[6:0] = 7'b000_0111; // LOAD
+            2'b01: inst_32[6:0] = 7'b010_0111; // STORE
+            2'b10: inst_32[6:0] = 7'b101_0111; // ARI
+          endcase
+          inst_tr.bin2tr(inst_32, rvs_if.inst_pkg_cq2de[i].rs1);
+          inst_tr.pc = rvs_if.insts_rvs2cq[i].inst_pc;
+          foreach(inst_rx_queue[idx]) begin
+            if(inst_rx_queue[idx].compare_inst(inst_tr)) begin
+              `uvm_info(get_type_name(), $sformatf("DUT discarded inst:\n%s", inst_rx_queue[idx].sprint()), UVM_HIGH)
+              inst_rx_queue.delete(idx);
+              break;
+            end
+          end
+        end
+      end
+
+      // Collect retire info
       for(int rt_idx=0; rt_idx<`NUM_RT_UOP; rt_idx++) begin
         if(rvs_if.rt_uop[rt_idx]) begin
           if(ready_to_new_inst) begin
+            if(inst_rx_queue.size() == 0) begin
+              `uvm_fatal("TB_ISSUE", "Retiring new inst while inst_rx_queue is empty.\n")
+            end
             tr = new("tr");
             tr = inst_rx_queue.pop_front();
             ready_to_new_inst = 0;
+            `uvm_info(get_type_name(), $sformatf("Ready to according retire info of new inst:\n%s", tr.sprint()), UVM_HIGH);
+            uop_cnt = 0;
+          end else begin
+            uop_cnt++;
           end
+          `uvm_info(get_type_name(), $sformatf("uops %0d of inst 0x%08x\n", uop_cnt, tr.pc), UVM_HIGH);
 
           // VRF
           if(rvs_if.rt_vrf_valid_rob2rt[rt_idx]) begin
@@ -363,14 +408,14 @@ endtask: rx_timeout_monitor
 
 task rvs_monitor::idle_monitor();
   forever begin
-    @(posedge rvs_if.clk);
+    @(negedge rvs_if.clk);
     if(~rvs_if.rst_n) begin
       if(rvs_if.rvv_idle !== 1) begin
         `uvm_error(get_type_name(), "rvv_idle != 1 while rst_n == 0.")
       end
     end else begin
       if(rvs_if.rvv_idle && inst_rx_queue.size() != 0) begin
-        `uvm_error(get_type_name(), $sformatf("rvv_idle should be 1."))
+        `uvm_error(get_type_name(), $sformatf("Rvv in idle mode, but rvs monitor has instructions to wait for retire info."))
       end
     end
   end
