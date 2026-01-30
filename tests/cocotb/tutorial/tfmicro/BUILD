@@ -345,10 +345,9 @@ cocotb_test_suite(
         "vcs",
     ],
     testcases = [
-        "test_mean_small",
-        "test_mean_mobilenet_style",
-        "test_mean_large_spatial",
-        "test_mean_odd_channel",
+        "test_01_global_pooling_small",
+        "test_02_global_pooling_batch",
+        "test_model_mobilenet_gap",
     ],
     tests_kwargs = {
         "waves": False, # 调试时可以设为 True

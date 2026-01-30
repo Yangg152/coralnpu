@@ -15,11 +15,14 @@ namespace coralnpu_v2::opt::litert_micro {
 using tflite::RuntimeShape;
 using tflite::OpDataReduce;
 
+// 辅助函数：计算前导零 (类似 tflite::CountLeadingZeros)
+static inline int CountLeadingZeros32(uint32_t x) {
+  return x == 0 ? 32 : __builtin_clz(x);
+}
+
 // =========================================================
 // 1. RVV 优化核心函数
 // =========================================================
-// 注意：该函数必须定义在 coralnpu_v2::opt::litert_micro 命名空间下，
-// 不能放在匿名 namespace { ... } 中，否则会与头文件声明冲突。
 void MeanGlobalPoolingQuantizedRVV(
     const int8_t* input_data, int8_t* output_data,
     int32_t num_batches, int32_t input_height, int32_t input_width, int32_t num_channels,
@@ -29,8 +32,33 @@ void MeanGlobalPoolingQuantizedRVV(
   const int32_t num_elements_in_axis = input_height * input_width;
   const int32_t offset_correction = -num_elements_in_axis * input_zero_point;
   
+  // [关键修复] -----------------------------------------------------------
+  // 必须根据元素个数调整 multiplier 和 shift，实现 "Mean" (即除以 N) 的效果。
+  
+  int32_t effective_multiplier = multiplier;
+  int32_t effective_shift = shift;
+
+  if (num_elements_in_axis > 0) {
+    // 1. 计算除法所需的位移
+    int division_shift = 31 - CountLeadingZeros32(static_cast<uint32_t>(num_elements_in_axis));
+    
+    // 2. 限制位移范围，防止精度溢出
+    division_shift = std::min(division_shift, 32);
+    
+    // [修复编译错误]: 显式转换类型，确保 std::min 参数类型一致 (int vs int32_t/long)
+    division_shift = std::min(division_shift, static_cast<int>(31 + shift));
+
+    // 3. 调整 Multiplier： (Multiplier << division_shift) / N
+    effective_multiplier = static_cast<int32_t>(
+        (static_cast<int64_t>(multiplier) << division_shift) /
+        num_elements_in_axis);
+    
+    // 4. 调整 Shift
+    effective_shift = shift - division_shift;
+  }
+  // ----------------------------------------------------------------------
+
   for (int b = 0; b < num_batches; ++b) {
-    // 按 Channel 分块处理
     size_t c_idx = 0;
     size_t c_remain = num_channels;
 
@@ -44,7 +72,6 @@ void MeanGlobalPoolingQuantizedRVV(
       
       // 遍历 H*W 个像素
       for (int i = 0; i < num_elements_in_axis; ++i) {
-        // 加载当前像素的 C[c_idx ... c_idx+vl]
         const int8_t* current_pixel_ptr = src_ptr_base + (i * num_channels);
         
         vint8m2_t v_val = __riscv_vle8_v_i8m2(current_pixel_ptr, vl);
@@ -56,12 +83,13 @@ void MeanGlobalPoolingQuantizedRVV(
       v_acc = __riscv_vadd_vx_i32m8(v_acc, offset_correction, vl);
 
       constexpr uint32_t vxrm = 0; 
-      if (multiplier != 0) {
-        v_acc = __riscv_vsmul_vx_i32m8(v_acc, multiplier, vxrm, vl);
-        if (shift > 0) {
-             v_acc = __riscv_vsll_vx_i32m8(v_acc, shift, vl);
+      if (effective_multiplier != 0) {
+        v_acc = __riscv_vsmul_vx_i32m8(v_acc, effective_multiplier, vxrm, vl);
+        
+        if (effective_shift > 0) {
+             v_acc = __riscv_vsll_vx_i32m8(v_acc, effective_shift, vl);
         } else {
-             v_acc = __riscv_vssra_vx_i32m8(v_acc, -shift, vxrm, vl);
+             v_acc = __riscv_vssra_vx_i32m8(v_acc, -effective_shift, vxrm, vl);
         }
       }
 
@@ -81,7 +109,7 @@ void MeanGlobalPoolingQuantizedRVV(
 }
 
 // =========================================================
-// 2. TFLite Kernel Interface
+// 2. TFLite Kernel Interface (保持不变)
 // =========================================================
 
 void* MeanInit(TfLiteContext* context, const char* buffer, size_t length) {
@@ -97,17 +125,13 @@ TfLiteStatus MeanEval(TfLiteContext* context, TfLiteNode* node) {
   OpDataReduce* data = static_cast<OpDataReduce*>(node->user_data);
   
   const TfLiteEvalTensor* input = tflite::micro::GetEvalInput(context, node, 0);
-  // 移除未使用的 axis 变量
-  // const TfLiteEvalTensor* axis = tflite::micro::GetEvalInput(context, node, 1);
   TfLiteEvalTensor* output = tflite::micro::GetEvalOutput(context, node, 0);
 
-  // 1. 检查是否满足 RVV 优化条件：Global Pooling
   bool is_global_pooling = false;
   
   const auto& in_shape = tflite::micro::GetTensorShape(input);
   const auto& out_shape = tflite::micro::GetTensorShape(output);
   
-  // 检查: Rank=4, H,W > 1, Out H,W = 1, Channels 保持不变
   if (in_shape.DimensionsCount() == 4 && out_shape.DimensionsCount() == 4) {
       if (in_shape.Dims(1) > 1 && in_shape.Dims(2) > 1 && 
           out_shape.Dims(1) == 1 && out_shape.Dims(2) == 1 &&
@@ -117,25 +141,17 @@ TfLiteStatus MeanEval(TfLiteContext* context, TfLiteNode* node) {
   }
 
   if (is_global_pooling) {
-    int num_batches = in_shape.Dims(0);
-    int input_height = in_shape.Dims(1);
-    int input_width = in_shape.Dims(2);
-    int num_channels = in_shape.Dims(3);
-
-    // 调用我们在上面定义的函数 (不再有歧义)
     MeanGlobalPoolingQuantizedRVV(
         tflite::micro::GetTensorData<int8_t>(input),
         tflite::micro::GetTensorData<int8_t>(output),
-        num_batches, input_height, input_width, num_channels,
+        in_shape.Dims(0), in_shape.Dims(1), in_shape.Dims(2), in_shape.Dims(3),
         data->input_zp,
         data->output_zp,
         data->multiplier, 
         data->shift);
-        
     return kTfLiteOk;
   }
 
-  // 2. Fallback
   return tflite::EvalMeanHelper(context, node, data);
 }
 
