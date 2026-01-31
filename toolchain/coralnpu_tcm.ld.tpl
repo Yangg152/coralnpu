@@ -8,7 +8,7 @@ MEMORY {
     EXTMEM(rw): ORIGIN = 0x20000000, LENGTH = 4096K
 }
 
-STACK_SIZE = DEFINED(__stack_size__) ? __stack_size__ : 0x80;
+STACK_SIZE = DEFINED(__stack_size__) ? __stack_size__ : 0x8000;
 __stack_size = STACK_SIZE;
 __stack_shift = 7;
 __boot_hart = 0;

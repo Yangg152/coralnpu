@@ -24,6 +24,10 @@ load(
     "VERILATOR_BUILD_ARGS",
 )
 
+# ==============================================================================
+# 0. Partial MobileNet V1 (Existing)
+# ==============================================================================
+
 coralnpu_v2_binary(
     name = "run_mobilenet_v1_025_partial_binary",
     srcs = [
@@ -98,6 +102,10 @@ cocotb_test_suite(
     verilator_model = "//tests/cocotb:rvv_core_mini_highmem_axi_model",
 )
 
+# ==============================================================================
+# Depthwise Conv Test (Existing)
+# ==============================================================================
+
 coralnpu_v2_binary(
     name = "depthwise_conv_test",
     srcs = ["depthwise_conv_test.cc"],
@@ -148,8 +156,11 @@ cocotb_test_suite(
     vcs_verilog_sources = ["//hdl/chisel/src/coralnpu:rvv_core_mini_highmem_axi_cc_library_verilog"],
     verilator_model = "//tests/cocotb:rvv_core_mini_highmem_axi_model",
 )
-# 1. 生成新模型的 C++ 数组文件
-# 把 mobilenet_v1_025_128_quant.tflite 下载到了 models/ 目录下
+
+# ==============================================================================
+# 1. Full MobileNet V1 Quant (128x128) [NEW]
+# ==============================================================================
+
 generate_cc_arrays(
     name = "mobilenet_v1_025_128_quant_cc",
     src = "models/mobilenet_v1_025_128_quant.tflite",
@@ -162,16 +173,16 @@ generate_cc_arrays(
     out = "mobilenet_v1_025_128_quant.h",
 )
 
-# 2. 定义新的二进制文件目标
-# 使用一个新的 C++ 源文件 run_mobilenet_full.cc
 coralnpu_v2_binary(
     name = "run_mobilenet_v1_025_128_quant_binary",
     srcs = [
-        "mobilenet_v1_025_128_quant_cc",
+        ":mobilenet_v1_025_128_quant_cc",
+        ":mobilenet_v1_025_128_quant_h",
         "run_mobilenet_full.cc", 
     ],
-    hdrs = ["mobilenet_v1_025_128_quant.h"],
-    linker_script = "@coralnpu_hw//toolchain:coralnpu_tcm_highmem.ld",
+    # 修正：指定内存大小，匹配 highmem 需求
+    itcm_size_kbytes = 1024,  # Highmem
+    dtcm_size_kbytes = 1024,  # Highmem
     deps = [
         "//sw/opt/litert-micro:mul",
         "//sw/opt/litert-micro:sub",
@@ -186,16 +197,14 @@ coralnpu_v2_binary(
     ],
 )
 
-# 3. 更新测试套件
-# 将新的 binary 添加到数据依赖中
 cocotb_test_suite(
-    name = "cocotb_run_mobilenet_full", # 改个名字区分
+    name = "cocotb_run_mobilenet_full",
     simulators = [
         "verilator",
         "vcs",
     ],
-    testcases = RUN_MOBILENET_TEST,
-    testcases_vname = "RUN_MOBILENET_TEST",
+    testcases = ["core_mini_rvv_mobilenet_full"],
+    testcases_vname = "RUN_MOBILENET_FULL_TEST", 
     tests_kwargs = {
         "waves": False,
         "tags" : ["manual"],
@@ -208,7 +217,6 @@ cocotb_test_suite(
             "//coralnpu_test_utils:sim_test_fixture",
             "@rules_python//python/runfiles",
         ],
-        # 注意这里：改成新的 binary 名字
         "data": ["run_mobilenet_v1_025_128_quant_binary.elf"], 
     },
     vcs_build_args = VCS_BUILD_ARGS,
@@ -219,19 +227,22 @@ cocotb_test_suite(
     verilator_model = "//tests/cocotb:rvv_core_mini_highmem_axi_model",
 )
 
-# conv
+# ==============================================================================
+# 2. Conv Test [NEW]
+# ==============================================================================
+
 coralnpu_v2_binary(
-    name = "conv_test", # 生成 conv_test.elf
+    name = "conv_test",
     srcs = ["conv_test.cc"],
-    linker_script = "@coralnpu_hw//toolchain:coralnpu_tcm_highmem.ld",
+    itcm_size_kbytes = 1024,  # Highmem
+    dtcm_size_kbytes = 1024,  # Highmem
     deps = [
         "//sw/opt/litert-micro:conv", 
-        "//sw/opt/litert-micro:depthwise_conv", # 借用一下配置
+        "//sw/opt/litert-micro:depthwise_conv",
         "@tflite_micro//tensorflow/lite/kernels/internal:reference_base"
     ],
 )
 
-# 2. 定义 Python 测试套件
 cocotb_test_suite(
     name = "cocotb_conv",
     simulators = [
@@ -245,7 +256,7 @@ cocotb_test_suite(
         "test_conv1x1_odd_channels",
     ],
     tests_kwargs = {
-        "waves": False, # 调试时可以设为 True
+        "waves": False,
         "hdl_toplevel": "RvvCoreMiniHighmemAxi",
         "size": "enormous",
         "default_testcase_size": "medium",
@@ -267,11 +278,15 @@ cocotb_test_suite(
     verilator_model = "//tests/cocotb:rvv_core_mini_highmem_axi_model",
 )
 
-# mul and sub
+# ==============================================================================
+# 3. Mul & Sub Test [NEW]
+# ==============================================================================
+
 coralnpu_v2_binary(
     name = "mul_sub_test", 
     srcs = ["mul_sub_test.cc"],
-    linker_script = "@coralnpu_hw//toolchain:coralnpu_tcm_highmem.ld",
+    itcm_size_kbytes = 1024,  # Highmem
+    dtcm_size_kbytes = 1024,  # Highmem
     deps = [
         "//sw/opt/litert-micro:mul", 
         "//sw/opt/litert-micro:sub", 
@@ -285,7 +300,6 @@ coralnpu_v2_binary(
     ],
 )
 
-# 2. 定义 Python 测试套件
 cocotb_test_suite(
     name = "cocotb_mul_sub",
     simulators = [
@@ -302,7 +316,7 @@ cocotb_test_suite(
         "test_sub_broadcast_scalar_minus_vector",
     ],
     tests_kwargs = {
-        "waves": False, # 调试时可以设为 True
+        "waves": False,
         "hdl_toplevel": "RvvCoreMiniHighmemAxi",
         "size": "enormous",
         "default_testcase_size": "medium",
@@ -324,20 +338,22 @@ cocotb_test_suite(
     verilator_model = "//tests/cocotb:rvv_core_mini_highmem_axi_model",
 )
 
-# mean
-# 1. 编译 C++ 测试二进制
+# ==============================================================================
+# 4. Mean Test [NEW]
+# ==============================================================================
+
 coralnpu_v2_binary(
-    name = "mean_test", # 生成 mean_test.elf
+    name = "mean_test",
     srcs = ["mean_test.cc"],
-    linker_script = "@coralnpu_hw//toolchain:coralnpu_tcm_highmem.ld",
+    itcm_size_kbytes = 1024,  # Highmem
+    dtcm_size_kbytes = 1024,  # Highmem
     deps = [
         "//sw/opt/litert-micro:mean", 
-        "//sw/opt/litert-micro:depthwise_conv", # 借用一下配置
+        "//sw/opt/litert-micro:depthwise_conv",
         "@tflite_micro//tensorflow/lite/kernels/internal:reference_base"
     ],
 )
 
-# 2. 定义 Python 测试套件
 cocotb_test_suite(
     name = "cocotb_mean",
     simulators = [
@@ -350,7 +366,7 @@ cocotb_test_suite(
         "test_model_mobilenet_gap",
     ],
     tests_kwargs = {
-        "waves": False, # 调试时可以设为 True
+        "waves": False,
         "hdl_toplevel": "RvvCoreMiniHighmemAxi",
         "size": "enormous",
         "default_testcase_size": "medium",
