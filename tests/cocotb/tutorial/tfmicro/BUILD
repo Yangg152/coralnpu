@@ -202,7 +202,7 @@ cocotb_test_suite(
         "hdl_toplevel": "RvvCoreMiniHighmemAxi",
         "seed": "42",
         "size": "enormous",
-        "test_module": ["cocotb_run_mobilenet_v1.py"], # 复用 Python 脚本
+        "test_module": ["cocotb_run_mobilenet_full.py"], 
         "deps": [
             "//coralnpu_test_utils:core_mini_axi_sim_interface",
             "//coralnpu_test_utils:sim_test_fixture",

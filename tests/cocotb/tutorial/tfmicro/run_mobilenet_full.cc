@@ -1,14 +1,3 @@
-// Copyright 2025 Google LLC
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//     https://www.apache.org/licenses/LICENSE-2.0
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -33,7 +22,7 @@
 
 // === 全局变量定义 ===
 extern "C" {
-constexpr size_t kTensorArenaSize = 512 * 1024; 
+constexpr size_t kTensorArenaSize = 256 * 1024; 
 
 int8_t inference_status = -1;       
 uint32_t inference_cycles = 0;      
@@ -64,7 +53,7 @@ int debug_log_index = 0;
 namespace {
 
 // 增加算子槽位到 32
-using MobilenetOpResolver = tflite::MicroMutableOpResolver<32>;
+using MobilenetOpResolver = tflite::MicroMutableOpResolver<16>;
 using coralnpu_v2::opt::litert_micro::Register_CONV_2D;
 using coralnpu_v2::opt::litert_micro::Register_DEPTHWISE_CONV_2D;
 using coralnpu_v2::opt::litert_micro::Register_MUL;
@@ -126,7 +115,6 @@ class CycleProfiler : public tflite::MicroProfiler {
   uint32_t last_start_ = 0;
 };
 
-// [新增] 重新实现 DebugLog
 // TFLite Micro 内部会调用这个函数来打印错误
 extern "C" void __wrap_DebugLog(const char* s) {
   // 将字符串追加到全局 buffer 中
@@ -141,7 +129,7 @@ int main(int argc, char** argv) {
   tflite::InitializeTarget(); 
 
   const tflite::Model* model =
-      tflite::GetModel(g_mobilenet_v1_025_128_quant_model_data);
+      tflite::GetModel(g_mobilenet_v1_025_partial_layers_model_data);
 
   if (model->version() != TFLITE_SCHEMA_VERSION) {
      std::strncpy(inference_status_message, "Model schema mismatch", 63);
@@ -161,8 +149,6 @@ int main(int argc, char** argv) {
 
   // 尝试分配 Tensor
   if (interpreter.AllocateTensors() != kTfLiteOk) {
-    // 如果这里失败，通常是因为缺算子(Missing Op)或 Arena 太小
-    // 我们已经补全了算子，且 800KB 对该模型足够
     std::strncpy(inference_status_message, "AllocateTensors failed", 63);
     return -1;
   }

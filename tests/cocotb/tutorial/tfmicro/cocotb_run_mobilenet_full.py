@@ -1,17 +1,3 @@
-# Copyright 2025 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import cocotb
 from cocotb.triggers import ClockCycles
 
@@ -47,29 +33,41 @@ async def core_mini_rvv_mobilenet_v1(dut):
         while True:
             # 每隔 5000 个周期检查一次内存
             await ClockCycles(dut.io_aclk, 5000)
+
+            try:
+                raw_status = await fixture.read('inference_status', 1)
+                status = int.from_bytes(bytes(raw_status), byteorder='little', signed=True)
+                
+                if status == 0:
+                    pass 
+                    print(f"\n[Monitor] Detected inference_status == 0 (Success). Stopping simulation...", flush=True)
+                    return # 退出监控，配合主线程逻辑修改
+            except Exception:
+                pass #     
             
             try:
-                # [修复] 使用 fixture.read 读取 op_log_count，而不是手动计算地址
+                # 读取 op_log_count
                 raw_count = await fixture.read('op_log_count', 4)
-                current_count = int.from_bytes(raw_count, byteorder='little')
+                # [修复] 强制转为 bytes，防止 numpy array 报错
+                current_count = int.from_bytes(bytes(raw_count), byteorder='little')
                 
                 # 如果计数增加，说明有新算子跑完了
                 if current_count > last_count:
-                    # 计算需要读取的总字节数 (从数组开头到当前位置)
-                    # fixture.read('op_logs', size) 会从数组起始地址读取 size 个字节
                     bytes_to_read = current_count * OP_LOG_ENTRY_SIZE
                     
-                    # 虽然每次都读前面的数据稍微有点冗余，但数据量很小(几KB)，这样做最稳健，不需要手动算偏移
-                    all_logs_data = await fixture.read('op_logs', bytes_to_read)
+                    # 读取所有日志数据
+                    all_logs_data_raw = await fixture.read('op_logs', bytes_to_read)
+                    # [修复] 关键步骤：将 numpy array 转为 bytes
+                    all_logs_data = bytes(all_logs_data_raw)
                     
                     # 只处理新增的部分
                     for i in range(last_count, current_count):
-                        # 在 Python bytes 中切片
                         offset = i * OP_LOG_ENTRY_SIZE
                         entry_data = all_logs_data[offset : offset + OP_LOG_ENTRY_SIZE]
                         
                         # 解析 Name (前32字节)
                         raw_name = entry_data[0:32]
+                        # split 是 bytes 的方法，这里现在安全了
                         op_name = raw_name.split(b'\0')[0].decode(errors='replace')
                         
                         # 解析 Cycles (后4字节)
@@ -88,8 +86,8 @@ async def core_mini_rvv_mobilenet_v1(dut):
                     
                     last_count = current_count
             except Exception as e:
-                # 打印异常但不要中断仿真
-                print(f"Profiler Monitor Warning: {e}")
+                # 打印异常详情以便调试
+                print(f"Profiler Monitor Warning: {e} (Type: {type(e)})")
 
     # === 进度打印协程 ===
     async def show_progress(dut):
@@ -101,7 +99,8 @@ async def core_mini_rvv_mobilenet_v1(dut):
             print(f"[Sim] Running... {count * step_cycles} cycles", flush=True)
 
     # === 主流程 ===
-    elf_files = ['run_mobilenet_v1_025_partial_binary.elf']
+    # elf_files = ['run_mobilenet_v1_025_partial_binary.elf'] 
+    elf_files = ['run_mobilenet_v1_025_128_quant_binary.elf'] 
     
     for elf_file in elf_files:
         # 加载 ELF 并查找符号地址
@@ -114,7 +113,8 @@ async def core_mini_rvv_mobilenet_v1(dut):
                 'output_class',
                 'output_score',
                 'op_log_count',  
-                'op_logs'       
+                'op_logs'     ,
+                'debug_log_buffer'  
             ])
         
         print("Starting execution...", flush=True)
@@ -139,12 +139,12 @@ async def core_mini_rvv_mobilenet_v1(dut):
         
         # 1. 再次检查是否有遗漏的日志
         raw_count = await fixture.read('op_log_count', 4)
-        final_log_count = int.from_bytes(raw_count, byteorder='little')
+        final_log_count = int.from_bytes(bytes(raw_count), byteorder='little') # [修复] 转 bytes
         
         if final_log_count > len(collected_ops):
-            # 补齐读取
             bytes_to_read = final_log_count * OP_LOG_ENTRY_SIZE
-            all_logs_data = await fixture.read('op_logs', bytes_to_read)
+            all_logs_data_raw = await fixture.read('op_logs', bytes_to_read)
+            all_logs_data = bytes(all_logs_data_raw) # [修复] 转 bytes
             
             for i in range(len(collected_ops), final_log_count):
                 offset = i * OP_LOG_ENTRY_SIZE
@@ -155,25 +155,37 @@ async def core_mini_rvv_mobilenet_v1(dut):
                 
                 collected_ops.append({'id': i, 'name': op_name, 'cycles': op_cycles})
 
-        # 2. 读取标准状态位
+        # 2. 读取标准状态位 (增加 bytes 转换以防万一)
         raw_status = await fixture.read('inference_status', 1)
-        tflite_inference_status = int.from_bytes(raw_status, byteorder='little', signed=True)
+        tflite_inference_status = int.from_bytes(bytes(raw_status), byteorder='little', signed=True)
+
+        raw_debug_log = await fixture.read('debug_log_buffer', 4096)
+        debug_log_str = bytes(raw_debug_log).split(b'\0')[0].decode(errors='replace')
 
         msg_bytes = await fixture.read('inference_status_message', 64)
         tflite_inference_message = bytes(msg_bytes).split(b'\0')[0].decode(errors='replace')
 
         raw_cycles = await fixture.read('inference_cycles', 4)
-        total_inference_cycles = int.from_bytes(raw_cycles, byteorder='little', signed=False)
+        total_inference_cycles = int.from_bytes(bytes(raw_cycles), byteorder='little', signed=False)
 
         raw_class = await fixture.read('output_class', 4)
-        pred_class = int.from_bytes(raw_class, byteorder='little', signed=True)
+        pred_class = int.from_bytes(bytes(raw_class), byteorder='little', signed=True)
         
         raw_score = await fixture.read('output_score', 1)
-        pred_score = int.from_bytes(raw_score, byteorder='little', signed=True)
+        pred_score = int.from_bytes(bytes(raw_score), byteorder='little', signed=True)
 
         # ---------------------------------------------------------
         # 打印最终总报告
         # ---------------------------------------------------------
+
+        print("=" * 60, flush=True)
+        print(f" Status:        {tflite_inference_status} ({'SUCCESS' if tflite_inference_status == 0 else 'FAILED'})", flush=True)
+        # 打印详细日志
+        if len(debug_log_str) > 0:
+            print(f" Debug Log:\n{'-'*20}\n{debug_log_str}\n{'-'*20}", flush=True)
+        else:
+            print(f" Debug Log:     (Empty)", flush=True)
+
         print("=" * 60, flush=True)
         print(f"FINAL PERFORMANCE REPORT: MobileNet V1", flush=True)
         print("=" * 60, flush=True)

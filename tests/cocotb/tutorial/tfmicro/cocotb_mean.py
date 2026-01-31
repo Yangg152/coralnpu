@@ -188,7 +188,24 @@ async def test_02_global_pooling_batch(dut):
     await test.run_compare(ref_cycles_limit=100_000, opt_cycles_limit=20_000, check_opt=True)
 
 @cocotb.test()
-async def test_model_mobilenet_gap(dut):
+async def test_03_axis_1_height_only(dut):
+    input_shape = [1, 4, 4, 8]
+    axis = [1]
+    test = MeanOpTest(dut, input_shape=input_shape, axis=axis, keep_dims=True)
+    await test.setup()
+    await test.run_compare(ref_cycles_limit=100_000, opt_cycles_limit=20_000, check_opt=True)
+
+
+@cocotb.test()
+async def test_04_axis_2_width_only(dut):
+    input_shape = [1, 4, 4, 8]
+    axis = [2]
+    test = MeanOpTest(dut, input_shape=input_shape, axis=axis, keep_dims=True)
+    await test.setup()
+    await test.run_compare(ref_cycles_limit=100_000, opt_cycles_limit=20_000, check_opt=True)
+
+@cocotb.test()
+async def test_model_mobilenet_1(dut):
     """
     Real World Case: MobileNet Global Average Pooling
     From user uploaded image.
@@ -217,4 +234,19 @@ async def test_model_mobilenet_gap(dut):
     # 我们设置比较宽裕的 limit 以防万一。
     await test.run_compare(ref_cycles_limit=200_000_00, opt_cycles_limit=50_000_00, check_opt=True)
 
+@cocotb.test()
+async def test_model_mobilenet_2(dut):
+    input_shape = [1, 4, 4, 256]
+    axis = [1]
+    test = MeanOpTest(dut, input_shape=input_shape, axis=axis, keep_dims=True)
+    await test.setup()
+    await test.run_compare(ref_cycles_limit=200_000_00, opt_cycles_limit=50_000_00, check_opt=True)
+
+@cocotb.test()
+async def test_model_mobilenet_3(dut):
+    input_shape = [1, 4, 4, 256]
+    axis = [2]
+    test = MeanOpTest(dut, input_shape=input_shape, axis=axis, keep_dims=True)
+    await test.setup()
+    await test.run_compare(ref_cycles_limit=200_000_00, opt_cycles_limit=50_000_00, check_opt=True)
 
