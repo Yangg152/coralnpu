@@ -43,19 +43,19 @@ using coralnpu_v2::opt::litert_micro::Register_SUB;
 using coralnpu_v2::opt::litert_micro::Register_MEAN;
 
 TfLiteStatus RegisterOps(MobilenetOpResolver& op_resolver) {
-  TF_LITE_ENSURE_STATUS(op_resolver.AddConv2D());
-  TF_LITE_ENSURE_STATUS(op_resolver.AddDepthwiseConv2D());
-  TF_LITE_ENSURE_STATUS(op_resolver.AddMul());
-  TF_LITE_ENSURE_STATUS(op_resolver.AddSub()); 
-  TF_LITE_ENSURE_STATUS(op_resolver.AddMean());
+  // TF_LITE_ENSURE_STATUS(op_resolver.AddConv2D());
+  // TF_LITE_ENSURE_STATUS(op_resolver.AddDepthwiseConv2D());
+  // TF_LITE_ENSURE_STATUS(op_resolver.AddMul());
+  // TF_LITE_ENSURE_STATUS(op_resolver.AddSub()); 
+  // TF_LITE_ENSURE_STATUS(op_resolver.AddMean());
 
-  // TF_LITE_ENSURE_STATUS(op_resolver.AddConv2D(Register_CONV_2D()));
-  // TF_LITE_ENSURE_STATUS(op_resolver.AddDepthwiseConv2D(Register_DEPTHWISE_CONV_2D()));
-  // TF_LITE_ENSURE_STATUS(op_resolver.AddMul(Register_MUL()));
-  // TF_LITE_ENSURE_STATUS(op_resolver.AddSub(Register_SUB())); 
-  // TF_LITE_ENSURE_STATUS(op_resolver.AddMean(Register_MEAN()));
+  TF_LITE_ENSURE_STATUS(op_resolver.AddConv2D(Register_CONV_2D()));
+  TF_LITE_ENSURE_STATUS(op_resolver.AddDepthwiseConv2D(Register_DEPTHWISE_CONV_2D()));
+  TF_LITE_ENSURE_STATUS(op_resolver.AddMul(Register_MUL()));
+  TF_LITE_ENSURE_STATUS(op_resolver.AddSub(Register_SUB())); 
+  TF_LITE_ENSURE_STATUS(op_resolver.AddMean(Register_MEAN()));
   TF_LITE_ENSURE_STATUS(op_resolver.AddReshape());             
-  TF_LITE_ENSURE_STATUS(op_resolver.AddSoftmax());      // 新增：MobileNet 最后的分类层
+  TF_LITE_ENSURE_STATUS(op_resolver.AddSoftmax());  
 
   return kTfLiteOk;
 }
