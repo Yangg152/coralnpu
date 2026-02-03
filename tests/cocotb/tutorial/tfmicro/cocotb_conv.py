@@ -297,6 +297,46 @@ async def test_conv3x3_stride2(dut):
     await t.load_and_populate_input(dut)
     await t.test(ref_target=400_000, opt_target=80_000, run_ref=True, check_python=True)
 
+# 1. 之前报错的场景：Padding=1, Stride=2
+# 这个测试专门用于回归验证你刚才遇到的 "Output mismatch" 问题
+@cocotb.test()
+async def test_conv3x3_pad1_stride2(dut):
+    t = ConvTest(in_ch=4, out_ch=8, h=7, w=7, kernel_size=3, stride=2, padding=1)
+    await t.load_and_populate_input(dut)
+    await t.test(ref_target=400_000, opt_target=80_000, run_ref=True, check_python=True)
+
+# 2. 宽度边界测试：Width = 9
+# 你的 3x3 优化代码每 8 个像素 unroll 一次。
+# Width=9 会测试：8个 Fast Path + 1个 Remainder Loop，这是极易出错的转换点。
+@cocotb.test()
+async def test_conv3x3_width_boundary(dut):
+    t = ConvTest(in_ch=4, out_ch=4, h=4, w=9, kernel_size=3, stride=1, padding=0)
+    await t.load_and_populate_input(dut)
+    await t.test(ref_target=500_000, opt_target=100_000, run_ref=True, check_python=True)
+
+# 3. 奇数通道测试 (非对齐)
+# 用于测试 RVV 的通道维度的 vsetvl/remainder 处理逻辑
+@cocotb.test()
+async def test_conv3x3_odd_channels(dut):
+    t = ConvTest(in_ch=3, out_ch=7, h=5, w=5, kernel_size=3, stride=1, padding=0)
+    await t.load_and_populate_input(dut)
+    await t.test(ref_target=500_000, opt_target=100_000, run_ref=True, check_python=True)
+
+# 4. 1x1 卷积的大尺寸压力测试
+# 确保在较大的 Loop 次数下，累加器不会溢出，且寄存器压力管理正常
+# @cocotb.test()
+# async def test_conv1x1_large(dut):
+#     t = ConvTest(in_ch=32, out_ch=32, h=8, w=8, kernel_size=1, stride=1, padding=0)
+#     await t.load_and_populate_input(dut)
+#     await t.test(ref_target=1_000_000, opt_target=200_000, run_ref=True, check_python=True)
+
+# 5. 通用卷积 Fallback 测试
+# 5x5 卷积，你的代码应该自动回退到 Reference 实现，确保 Dispatch 逻辑正确
+@cocotb.test()
+async def test_conv5x5_fallback(dut):
+    t = ConvTest(in_ch=2, out_ch=4, h=7, w=7, kernel_size=5, stride=1, padding=0)
+    await t.load_and_populate_input(dut)
+    await t.test(ref_target=1_000_000, opt_target=200_000, run_ref=True, check_python=True)
 
 # === Benchmarks ===
 
