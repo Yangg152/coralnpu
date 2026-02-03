@@ -164,7 +164,20 @@ register_toolchains(
     "//toolchain:cc_coralnpu_v2_semihosting_toolchain",
 )
 
-tflite_repos()
+#tflite_repos()
+
+local_repository(
+    name = "tflite_micro",
+    path = "/home/yang/Desktop/workspace/tflite-micro", 
+)
+
+http_archive(
+    name = "hedron_compile_commands",
+    sha256 = "bacabfe758676fdc19e4bea7c4a3ac99c7e7378d259a9f1054d341c6a6b44ff6",
+    strip_prefix = "bazel-compile-commands-extractor-1266d6a25314d165ca78d0061d3399e909b7920e",
+    url = "https://github.com/hedronvision/bazel-compile-commands-extractor/archive/1266d6a25314d165ca78d0061d3399e909b7920e.tar.gz",
+)
+
 
 load("@tflite_micro//tensorflow:workspace.bzl", tf_micro_workspace = "workspace")
 

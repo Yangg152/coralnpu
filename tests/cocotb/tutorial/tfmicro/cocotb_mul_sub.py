@@ -185,35 +185,35 @@ async def test_02_sub_small(dut):
 
 @cocotb.test()
 async def test_03_mul_elementwise(dut):
-    """MUL: Large (64,64,3)"""
-    test = BinaryOpTest(dut, shape=(64, 64, 3), broadcast_mode='none')
+    """MUL: Large (128,128,3)"""
+    test = BinaryOpTest(dut, shape=(128, 128, 3), broadcast_mode='none')
     await test.setup()
     await test.run_compare("MUL", 20_000_000, 500_000)
 
 @cocotb.test()
 async def test_04_mul_broadcast(dut):
-    """MUL: Broadcast (64,64,3)"""
-    test = BinaryOpTest(dut, shape=(64, 64, 3), broadcast_mode='input2')
+    """MUL: Broadcast (128,128,3)"""
+    test = BinaryOpTest(dut, shape=(128, 128, 3), broadcast_mode='input2')
     await test.setup()
     await test.run_compare("MUL", 20_000_000, 500_000)
 
 @cocotb.test()
 async def test_05_sub_elementwise(dut):
-    """SUB: Large (64,64,3)"""
-    test = BinaryOpTest(dut, shape=(64, 64, 3), broadcast_mode='none')
+    """SUB: Large (128,128,3)"""
+    test = BinaryOpTest(dut, shape=(128, 128, 3), broadcast_mode='none')
     await test.setup()
     await test.run_compare("SUB", 20_000_000, 500_000)
 
 @cocotb.test()
 async def test_06_sub_bcast_vec_scalar(dut):
     """SUB: Broadcast Vector-Scalar"""
-    test = BinaryOpTest(dut, shape=(64, 64, 3), broadcast_mode='input2')
+    test = BinaryOpTest(dut, shape=(128, 128, 3), broadcast_mode='input2')
     await test.setup()
     await test.run_compare("SUB", 20_000_000, 500_000)
 
 @cocotb.test()
 async def test_07_sub_bcast_scalar_vec(dut):
     """SUB: Broadcast Scalar-Vector"""
-    test = BinaryOpTest(dut, shape=(64, 64, 3), broadcast_mode='input1')
+    test = BinaryOpTest(dut, shape=(128, 128, 3), broadcast_mode='input1')
     await test.setup()
     await test.run_compare("SUB", 20_000_000, 500_000)

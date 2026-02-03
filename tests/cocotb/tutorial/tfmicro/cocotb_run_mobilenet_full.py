@@ -1,161 +1,181 @@
 # Copyright 2025 Google LLC
 # Licensed under the Apache License, Version 2.0
-# ... (License header omitted)
 
 import cocotb
 import sys
+import struct
 from cocotb.triggers import ClockCycles
-
 from coralnpu_test_utils.sim_test_fixture import Fixture
 from bazel_tools.tools.python.runfiles import runfiles
 
-# C++ 结构体大小
-OP_LOG_ENTRY_SIZE = 36 
-
-# 调试状态字典
+# [DebugStage 映射]
 STAGE_MAP = {
     0: "INIT",
-    1: "MODEL_LOADED",
-    2: "OPS_REGISTERED",
-    3: "ALLOCATE_START",
-    4: "ALLOCATE_DONE",
-    5: "INVOKE_START",
-    6: "INVOKE_RUNNING",
-    7: "INVOKE_DONE",
+    1: "MAGIC_CHECK",
+    2: "STRUCTURE_CHECK",
+    10: "PRE_CHECK",        
+    3: "OPS_REGISTERED",
+    4: "ALLOCATE_START",
+    5: "ALLOCATE_DONE",
+    6: "INVOKE_START",
+    8: "INVOKE_DONE",
     99: "ERROR"
 }
 
 @cocotb.test()
 async def core_mini_rvv_mobilenet_full(dut):
-    # 1. 初始化环境
     fixture = await Fixture.Create(dut, highmem=True)
     r = runfiles.Create()
     
-    collected_ops = []
+    # 辅助读取函数
+    async def read_u32(symbol):
+        raw = await fixture.read(symbol, 4)
+        return int.from_bytes(bytes(raw), byteorder='little')
 
-    # === 实时监控协程 (核心调试逻辑) ===
-    async def monitor_profiler(dut, fixture):
+    async def read_str(symbol, max_len=64):
+        raw = await fixture.read(symbol, max_len)
+        return bytes(raw).split(b'\0')[0].decode(errors='replace')
+
+    # 监控协程
+        # 监控协程
+    async def monitor_profiler():
         print(f"\n{'='*90}", flush=True)
-        print(f"DEBUG MONITOR ACTIVATED", flush=True)
+        print(f"DEBUG MONITOR ACTIVATED (Performance Tracing Mode)", flush=True)
         print(f"{'='*90}", flush=True)
-        print(f"{'IDX':<5} | {'Op Name':<30} | {'Cycles':<12} | {'System Stage'}", flush=True)
-        print(f"{'-'*90}", flush=True)
-
-        last_count = 0
-        last_debug_info = ""
         
+        last_log_str = "" 
+        last_status_msg = ""
+        last_stage = -1
+        stage_stuck_counter = 0 
+        
+        # 你的采样周期
+        SAMPLE_PERIOD = 20000 
+        # 新增：总累计周期计数器
+        total_monitored_cycles = 0 
+
         while True:
-            await ClockCycles(dut.io_aclk, 5000) # 每5000周期检查一次
+            await ClockCycles(dut.io_aclk, SAMPLE_PERIOD) 
             
+            # --- ✅ 新增代码开始: 每 500万 周期打印一次 ---
+            total_monitored_cycles += SAMPLE_PERIOD
+            if total_monitored_cycles % 5_000_000 == 0:
+                # 先清除当前行的状态栏，防止文字重叠
+                sys.stdout.write(f"\r{' '*90}\r")
+                # 打印永久日志（会自动换行，保留在屏幕上）
+                print(f"[HEARTBEAT] Simulation Running... Total Cycles: {total_monitored_cycles/1_000_000:.1f} M")
+            # --- ✅ 新增代码结束 ---
+
             try:
-                # --- 读取全局状态 ---
-                raw_stage = await fixture.read('debug_stage', 4)
-                stage_code = int.from_bytes(bytes(raw_stage), byteorder='little', signed=True)
+                stage_code = await read_u32('debug_stage')
+                if stage_code > 0x7FFFFFFF: stage_code -= 0x100000000
+                
+                op_idx = await read_u32('current_op_index')
+                if op_idx > 0x7FFFFFFF: op_idx -= 0x100000000
+
+                status_msg = await read_str('inference_status_message')
+                current_op_name = await read_str('current_running_op', 32)
+                
+                if stage_code == last_stage:
+                    stage_stuck_counter += 1
+                else:
+                    stage_stuck_counter = 0
+                    last_stage = stage_code
+
+                # 内存分配提示
+                if stage_code == 4: 
+                    if stage_stuck_counter % 200 == 0 and stage_stuck_counter > 0:
+                         elapsed_cycles = stage_stuck_counter * SAMPLE_PERIOD
+                         sys.stdout.write(f"\r{' '*90}\r") 
+                         print(f"[INFO] Memory Allocating... {elapsed_cycles/1000000:.1f}M cycles elapsed")
+
+                # 预检提示
+                elif stage_code == 10: 
+                    if status_msg != last_status_msg:
+                        sys.stdout.write(f"\r{' '*90}\r") 
+                        print(f"[PRE-CHECK] {status_msg}")
+                        last_status_msg = status_msg
+
+                # 状态更新
+                elif status_msg != last_status_msg and len(status_msg) > 0:
+                     sys.stdout.write(f"\r{' '*90}\r")
+                     print(f"[STATUS] {STAGE_MAP.get(stage_code, 'UNKNOWN')}: {status_msg}")
+                     last_status_msg = status_msg
+
+                # 底部状态栏 - [修复] 逻辑：只在正确阶段显示 OpIdx
                 stage_str = STAGE_MAP.get(stage_code, f"CODE_{stage_code}")
-
-                raw_op_idx = await fixture.read('current_op_index', 4)
-                op_idx = int.from_bytes(bytes(raw_op_idx), byteorder='little', signed=True)
-
-                raw_curr_op = await fixture.read('current_running_op', 32)
-                curr_op_name = bytes(raw_curr_op).split(b'\0')[0].decode(errors='replace')
-
-                # --- 动态刷新最后一行状态 ---
-                # 格式: [INVOKE_RUNNING] Op #12: CONV_2D
-                debug_info = f"[{stage_str}] Op #{op_idx}: {curr_op_name if curr_op_name else '...'}"
+                spinner = "|/-\\"[(stage_stuck_counter // 5) % 4]
                 
-                # 只有当日志没更新时，才刷新状态行
-                if debug_info != last_debug_info:
-                    sys.stdout.write(f"\r{' '*90}\r... {debug_info}")
-                    sys.stdout.flush()
-                    last_debug_info = debug_info
-
-                # --- 读取已完成的算子日志 ---
-                raw_count = await fixture.read('op_log_count', 4)
-                current_count = int.from_bytes(bytes(raw_count), byteorder='little')
+                op_display = " " * 20 # 默认留空
                 
-                if current_count > last_count:
-                    # 清除状态行，准备打印历史记录
-                    sys.stdout.write(f"\r{' '*90}\r")
-                    
-                    bytes_to_read = current_count * OP_LOG_ENTRY_SIZE
-                    all_logs_raw = await fixture.read('op_logs', bytes_to_read)
-                    all_logs_data = bytes(all_logs_raw)
-                    
-                    for i in range(last_count, current_count):
-                        offset = i * OP_LOG_ENTRY_SIZE
-                        entry_data = all_logs_data[offset : offset + OP_LOG_ENTRY_SIZE]
-                        
-                        op_name = entry_data[0:32].split(b'\0')[0].decode(errors='replace')
-                        op_cycles = int.from_bytes(entry_data[32:36], byteorder='little')
-                        
-                        # 打印历史记录 (永久保存)
-                        print(f"{i:<5} | {op_name:<30} | {op_cycles:<12,} | {stage_str}", flush=True)
-                        
-                        collected_ops.append({'id': i, 'name': op_name, 'cycles': op_cycles})
-                    
-                    last_count = current_count
-                    # 重新打印状态行
-                    sys.stdout.write(f"... {debug_info}")
-                    sys.stdout.flush()
+                if stage_code == 6: # INVOKE_START
+                    op_display = f"Op:{op_idx} [{current_op_name}]"
+                elif stage_code == 10: # PRE_CHECK
+                    op_display = f"ChkOp:{op_idx}"
+                
+                sys.stdout.write(f"\r {spinner} [{stage_str}] {op_display} | Msg: {status_msg[:30]}")
+                sys.stdout.flush()
 
-            except Exception:
-                pass # 忽略读取期间的瞬时错误
+            except Exception as e:
+                pass
 
-    # === 主测试流程 ===
     elf_file = 'run_mobilenet_v1_025_128_quant_binary.elf' 
+    elf_path = r.Rlocation('coralnpu_hw/tests/cocotb/tutorial/tfmicro/' + elf_file)
     
-    # 注意：必须加载 debug_stage 和 current_op_index 符号
     await fixture.load_elf_and_lookup_symbols(
-        r.Rlocation('coralnpu_hw/tests/cocotb/tutorial/tfmicro/' + elf_file),
+        elf_path,
         [
-            'inference_status', 
-            'inference_status_message', 
+            'inference_status', 'inference_status_message', 
+            'debug_stage', 'current_op_index', 'current_running_op',
             'inference_cycles',
-            'output_class',
-            'output_score',
-            'op_log_count',  
-            'op_logs',
-            'current_running_op',
-            'debug_stage',      # 新增
-            'current_op_index'  # 新增
+            'op_logs', 'op_log_count', 'debug_log_buffer'
         ])
     
-    monitor_task = cocotb.start_soon(monitor_profiler(dut, fixture))
+    monitor_task = cocotb.start_soon(monitor_profiler())
 
-    # 运行直到 Halt
-    halt_cycle_count = await fixture.run_to_halt(timeout_cycles=50_000_000) # 适当增加超时
-    
+    # 运行到结束
+    halt_cycle_count = await fixture.run_to_halt(timeout_cycles=500_000_000)
     monitor_task.kill()
-    sys.stdout.write(f"\r{' '*90}\r") # 清理最后一行
+    print(f"\n\nExecution halted at: {halt_cycle_count} cycles", flush=True)
 
-    print(f"\nExecution halted at: {halt_cycle_count} cycles", flush=True)
-
-    # === 读取最终结果 ===
-    # (为了稳妥，再次读取所有日志)
-    raw_count = await fixture.read('op_log_count', 4)
-    final_count = int.from_bytes(bytes(raw_count), byteorder='little')
-    
-    if final_count > len(collected_ops):
-        # ... 读取剩余日志 (代码同上，略微简化) ...
-        pass 
-
+    # 结果检查
     raw_status = await fixture.read('inference_status', 1)
     status = int.from_bytes(bytes(raw_status), byteorder='little', signed=True)
-    
-    msg_bytes = await fixture.read('inference_status_message', 64)
-    msg = bytes(msg_bytes).split(b'\0')[0].decode(errors='replace')
-    
-    raw_stage = await fixture.read('debug_stage', 4)
-    final_stage = int.from_bytes(bytes(raw_stage), byteorder='little', signed=True)
+    msg = await read_str('inference_status_message')
+    total_cycles = await read_u32('inference_cycles')
 
-    print("=" * 60)
-    print("FINAL DIAGNOSTICS")
-    print("=" * 60)
-    print(f"Debug Stage:     {STAGE_MAP.get(final_stage, final_stage)}")
-    print(f"Inference Status: {status}")
-    print(f"Status Message:  {msg}")
-    print(f"Last Op Index:   {collected_ops[-1]['id'] if collected_ops else 'None'}")
-    print("=" * 60)
+    # ==============================================================================
+    # 打印算子性能表
+    # ==============================================================================
+    if status == 0:
+        log_count = await read_u32('op_log_count')
+        print("\n" + "="*60)
+        print(f" PER-OPERATOR PERFORMANCE REPORT (Total: {log_count} ops)")
+        print("="*60)
+        print(f"{'Idx':<4} | {'Operator Name':<25} | {'Cycles':>12} | {'% Total':>7}")
+        print("-" * 60)
+
+        STRUCT_SIZE = 36 
+        
+        raw_logs = await fixture.read('op_logs', STRUCT_SIZE * log_count)
+        
+        sum_cycles = 0
+        for i in range(log_count):
+            offset = i * STRUCT_SIZE
+            entry_bytes = raw_logs[offset : offset + STRUCT_SIZE]
+            op_name_bytes, cycles = struct.unpack('<32sI', entry_bytes)
+            
+            op_name = op_name_bytes.split(b'\0')[0].decode(errors='replace')
+            sum_cycles += cycles
+            
+            pct = (cycles / total_cycles * 100) if total_cycles > 0 else 0
+            print(f"{i:<4} | {op_name:<25} | {cycles:>12,} | {pct:>6.1f}%")
+            
+        print("-" * 60)
+        print(f"{'SUM':<4} | {'All Operators':<25} | {sum_cycles:>12,} |")
+        print(f"{'TOT':<4} | {'Total Inference':<25} | {total_cycles:>12,} |")
+        print("=" * 60)
+    
+    print(f"FINAL STATUS: {status} ({msg})")
     
     if status != 0:
-        assert False, f"Test Failed: {msg} (Stage: {STAGE_MAP.get(final_stage)})"
+        assert False, f"Test Failed with status {status}: {msg}"

@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 
 #include "sw/opt/litert-micro/accumulator_util.h"
 #include "sw/opt/rvv_opt.h"
@@ -33,7 +34,6 @@
 
 namespace coralnpu_v2::opt::litert_micro {
 
-// 引用 TFLite 命名空间中的类型，避免重复定义结构体
 using tflite::ConvParams;
 using tflite::kConvBiasTensor;
 using tflite::kConvInputTensor;
@@ -50,7 +50,7 @@ using tflite::micro::GetTensorShape;
 namespace {
 
 // =========================================================
-// 1. 内存管理辅助工具 (与 depthwise_conv.cc 保持一致)
+// 1. 内存管理辅助工具
 // =========================================================
 
 struct AlignedFree {
@@ -62,19 +62,47 @@ using aligned_array = std::unique_ptr<T[], AlignedFree>;
 
 template <typename T>
 aligned_array<T> make_aligned_array(size_t alignment, size_t nmemb) {
-  // 注意：如果你的编译环境不支持 aligned_alloc (C11)，请替换为 memalign 或 posix_memalign
   void* ptr = aligned_alloc(alignment, sizeof(T) * nmemb);
   return aligned_array<T>(reinterpret_cast<T*>(ptr));
 }
 
 // =========================================================
-// 2. RVV 优化的 1x1 卷积 Kernel
+// 2. 量化核心辅助函数 (内联)
 // =========================================================
+// 将 int32 累加器转换为 int8 输出
+inline __attribute__((always_inline)) vint8m1_t QuantizeResult_m4(
+    vint32m4_t acc, 
+    vint32m4_t v_mult, 
+    vuint32m4_t v_lshift, 
+    vuint32m4_t v_rshift,
+    int32_t output_offset,
+    int32_t output_min,
+    int32_t output_max,
+    size_t vl) {
+    
+    constexpr uint32_t vxrm = 0; // Round-to-nearest-up
 
-// 针对 1x1 卷积的优化实现
-// 策略：外层循环遍历像素点，内层循环向量化处理 Output Channels (C_out)。
-// 权重访问：由于 TFLite 权重布局为 [C_out, C_in]，向量化 C_out 需要使用 stride load (跨度为 C_in)。
-void Conv1x1PerChannelRVV(
+    // Pipeline: Left Shift -> MultiplyHigh -> Right Shift -> Add Offset
+    acc = __riscv_vsll_vv_i32m4(acc, v_lshift, vl);
+    acc = __riscv_vsmul_vv_i32m4(acc, v_mult, vxrm, vl);
+    acc = __riscv_vssra_vv_i32m4(acc, v_rshift, vxrm, vl);
+    acc = __riscv_vadd_vx_i32m4(acc, output_offset, vl);
+    
+    // Narrowing: int32 -> int16 -> int8
+    vint16m2_t acc_16 = __riscv_vnclip_wx_i16m2(acc, 0, vxrm, vl);
+    vint8m1_t acc_8 = __riscv_vnclip_wx_i8m1(acc_16, 0, vxrm, vl);
+    
+    // Clamp
+    acc_8 = __riscv_vmax_vx_i8m1(acc_8, (int8_t)output_min, vl);
+    acc_8 = __riscv_vmin_vx_i8m1(acc_8, (int8_t)output_max, vl);
+    
+    return acc_8;
+}
+
+// =========================================================
+// 3. 极致优化的 1x1 卷积 (Weight Stationary)
+// =========================================================
+void Conv1x1PerChannelRVV_Optimized(
     const ConvParams& params, const int32_t* output_multiplier,
     const int32_t* output_shift, const RuntimeShape& input_shape,
     const int8_t* input_data, const RuntimeShape& filter_shape,
@@ -82,150 +110,308 @@ void Conv1x1PerChannelRVV(
     const int32_t* bias_data, const RuntimeShape& output_shape,
     int8_t* output_data) {
 
-  const int batches = input_shape.Dims(0);
-  const int input_height = input_shape.Dims(1);
-  const int input_width = input_shape.Dims(2);
   const int input_depth = input_shape.Dims(3);
   const int output_depth = output_shape.Dims(3);
-  
-  const int num_pixels = batches * input_height * input_width;
+  const int batches = input_shape.Dims(0);
+  const int num_pixels = batches * input_shape.Dims(1) * input_shape.Dims(2);
 
   const int32_t input_offset = params.input_offset;
   const int32_t output_offset = params.output_offset;
-  const int32_t output_activation_min = params.quantized_activation_min;
-  const int32_t output_activation_max = params.quantized_activation_max;
+  const int32_t output_min = params.quantized_activation_min;
+  const int32_t output_max = params.quantized_activation_max;
 
-  // 使用 aligned_array 替代栈上数组，防止栈溢出
+  // 预处理 Shift 参数
   auto lshift_data = make_aligned_array<uint8_t>(16, output_depth);
   auto rshift_data = make_aligned_array<uint8_t>(16, output_depth);
-  
-  if (!lshift_data || !rshift_data) {
-    // 内存分配失败，直接返回（在实际应用中可能需要错误处理机制）
-    return;
-  }
-
-  // 预计算 Shift 参数 (假设 accumulator_util.h 中有此函数)
+  if (!lshift_data || !rshift_data) return;
   PrepareShiftParams(lshift_data.get(), rshift_data.get(), output_shift, output_depth);
 
-  constexpr uint32_t vxrm = 0; // Rounding mode: round-to-nearest-up
+  // --------------------------------------------------------
+  // Loop 1: Output Channel Blocking (Weight Stationary)
+  // --------------------------------------------------------
+  int out_c = 0;
+  size_t out_c_rem = output_depth;
 
-  for (int p = 0; p < num_pixels; ++p) {
-    const int8_t* in_ptr_base = input_data + p * input_depth;
-    int8_t* out_ptr = output_data + p * output_depth;
+  while (out_c_rem > 0) {
+    // 使用 m4 以平衡寄存器压力 (32 regs: 4 acc + 1 weight + 3 quant params + temp = ~10-12 regs used)
+    const size_t vl = __riscv_vsetvl_e32m4(out_c_rem);
 
-    int out_c = 0;
-    size_t out_c_rem = output_depth;
+    // 1. 预加载 Quantization 参数
+    vint32m4_t v_mult = __riscv_vle32_v_i32m4(output_multiplier + out_c, vl);
+    vuint8m1_t v_lshift_8 = __riscv_vle8_v_u8m1(lshift_data.get() + out_c, vl);
+    vuint8m1_t v_rshift_8 = __riscv_vle8_v_u8m1(rshift_data.get() + out_c, vl);
+    vuint32m4_t v_lshift = __riscv_vzext_vf4_u32m4(v_lshift_8, vl);
+    vuint32m4_t v_rshift = __riscv_vzext_vf4_u32m4(v_rshift_8, vl);
 
-    while (out_c_rem > 0) {
-      // 设置向量长度，以 output_depth 为维度
-      const size_t vl = __riscv_vsetvl_e32m8(out_c_rem);
-
-      // 1. 初始化 Accumulator
-      vint32m8_t acc;
-      if (bias_data) {
-        acc = __riscv_vle32_v_i32m8(bias_data + out_c, vl);
-      } else {
-        acc = __riscv_vmv_v_x_i32m8(0, vl);
-      }
-
-      // 2. 权重指针设置
-      // 权重是 [C_out, C_in]。对于当前的 out_c 块，起始地址是 filter_data + out_c * input_depth
-      // 当我们在向量寄存器中处理 [out_c, out_c + vl] 时，
-      // W[out_c, 0] 和 W[out_c+1, 0] 之间的内存距离是 input_depth。
-      const int8_t* w_ptr = filter_data + out_c * input_depth;
-      const ptrdiff_t w_stride = input_depth * sizeof(int8_t); 
-
-      int in_c = 0;
-      const int8_t* in_ptr = in_ptr_base;
-
-      // 3. 计算循环 (Unrolling = 4)
-      // 这里的策略是：广播输入的 int8 (scalar)，加载一列权重的 int8 (vector stride load)，进行 MAC。
-      for (; in_c <= input_depth - 4; in_c += 4) {
-        // 加载 4 个输入值 (Scalar)
-        int8_t in_val_0 = in_ptr[0];
-        int8_t in_val_1 = in_ptr[1];
-        int8_t in_val_2 = in_ptr[2];
-        int8_t in_val_3 = in_ptr[3];
-        in_ptr += 4;
-
-        // 应用 Input Offset
-        int16_t in_16_0 = (int16_t)in_val_0 + (int16_t)input_offset;
-        int16_t in_16_1 = (int16_t)in_val_1 + (int16_t)input_offset;
-        int16_t in_16_2 = (int16_t)in_val_2 + (int16_t)input_offset;
-        int16_t in_16_3 = (int16_t)in_val_3 + (int16_t)input_offset;
-
-        // 加载 4 列权重 (Vector Strided Load)
-        // 使用 vlse8 (vector load strided element 8-bit)
-        vint8m2_t w_0 = __riscv_vlse8_v_i8m2(w_ptr + 0, w_stride, vl);
-        vint8m2_t w_1 = __riscv_vlse8_v_i8m2(w_ptr + 1, w_stride, vl);
-        vint8m2_t w_2 = __riscv_vlse8_v_i8m2(w_ptr + 2, w_stride, vl);
-        vint8m2_t w_3 = __riscv_vlse8_v_i8m2(w_ptr + 3, w_stride, vl);
-        w_ptr += 4; // 指针向 input_depth 方向移动 4
-
-        // 扩展权重并 MAC (Vector * Scalar)
-        // vwmacc.vx: acc += vector * scalar
-        vint16m4_t w_16_0 = __riscv_vsext_vf2_i16m4(w_0, vl);
-        acc = __riscv_vwmacc_vx_i32m8(acc, in_16_0, w_16_0, vl);
-
-        vint16m4_t w_16_1 = __riscv_vsext_vf2_i16m4(w_1, vl);
-        acc = __riscv_vwmacc_vx_i32m8(acc, in_16_1, w_16_1, vl);
-
-        vint16m4_t w_16_2 = __riscv_vsext_vf2_i16m4(w_2, vl);
-        acc = __riscv_vwmacc_vx_i32m8(acc, in_16_2, w_16_2, vl);
-
-        vint16m4_t w_16_3 = __riscv_vsext_vf2_i16m4(w_3, vl);
-        acc = __riscv_vwmacc_vx_i32m8(acc, in_16_3, w_16_3, vl);
-      }
-
-      // Cleanup Loop (处理剩余的 Input Channels)
-      for (; in_c < input_depth; ++in_c) {
-        int8_t in_val = *in_ptr++;
-        int16_t in_val_16 = (int16_t)in_val + (int16_t)input_offset;
-
-        vint8m2_t w_val_8 = __riscv_vlse8_v_i8m2(w_ptr, w_stride, vl);
-        w_ptr++; 
-        
-        vint16m4_t w_val_16 = __riscv_vsext_vf2_i16m4(w_val_8, vl);
-        acc = __riscv_vwmacc_vx_i32m8(acc, in_val_16, w_val_16, vl);
-      }
-
-      // 4. 量化 Pipeline (Requantization)
-      vint32m8_t v_mult = __riscv_vle32_v_i32m8(output_multiplier + out_c, vl);
-      vuint8m2_t v_lshift_8 = __riscv_vle8_v_u8m2(lshift_data.get() + out_c, vl);
-      vuint8m2_t v_rshift_8 = __riscv_vle8_v_u8m2(rshift_data.get() + out_c, vl);
-      
-      // 扩展 Shift 参数到 32位 以便进行向量位移
-      vuint32m8_t v_lshift_32 = __riscv_vzext_vf4_u32m8(v_lshift_8, vl);
-      vuint32m8_t v_rshift_32 = __riscv_vzext_vf4_u32m8(v_rshift_8, vl);
-
-      // 左移 -> 乘法 -> 右移 (rounding)
-      acc = __riscv_vsll_vv_i32m8(acc, v_lshift_32, vl);
-      acc = __riscv_vsmul_vv_i32m8(acc, v_mult, vxrm, vl);
-      acc = __riscv_vssra_vv_i32m8(acc, v_rshift_32, vxrm, vl);
-      
-      // Output Offset
-      acc = __riscv_vadd_vx_i32m8(acc, output_offset, vl);
-      
-      // 窄化 (Narrowing) 到 int8 并进行 Clamp
-      vint16m4_t acc_16 = __riscv_vnclip_wx_i16m4(acc, 0, vxrm, vl);
-      vint8m2_t acc_8 = __riscv_vnclip_wx_i8m2(acc_16, 0, vxrm, vl);
-      
-      acc_8 = __riscv_vmax_vx_i8m2(acc_8, (int8_t)output_activation_min, vl);
-      acc_8 = __riscv_vmin_vx_i8m2(acc_8, (int8_t)output_activation_max, vl);
-
-      // 存储结果
-      __riscv_vse8_v_i8m2(out_ptr + out_c, acc_8, vl);
-
-      out_c += vl;
-      out_c_rem -= vl;
+    // 2. 预加载 Bias
+    vint32m4_t bias_vec;
+    if (bias_data) {
+      bias_vec = __riscv_vle32_v_i32m4(bias_data + out_c, vl);
+    } else {
+      bias_vec = __riscv_vmv_v_x_i32m4(0, vl);
     }
+
+    // 权重基地址
+    const int8_t* w_ptr_base = filter_data + out_c * input_depth;
+    const ptrdiff_t w_stride = input_depth * sizeof(int8_t);
+
+    // ------------------------------------------------------
+    // Loop 2: Pixels (Unrolled x4)
+    // ------------------------------------------------------
+    int p = 0;
+    const int p_loop_end = num_pixels - 4;
+
+    for (; p <= p_loop_end; p += 4) {
+      // 初始化 4 个 Accumulators
+      vint32m4_t acc0 = bias_vec;
+      vint32m4_t acc1 = bias_vec;
+      vint32m4_t acc2 = bias_vec;
+      vint32m4_t acc3 = bias_vec;
+
+      const int8_t* in_ptr0 = input_data + (p + 0) * input_depth;
+      const int8_t* in_ptr1 = input_data + (p + 1) * input_depth;
+      const int8_t* in_ptr2 = input_data + (p + 2) * input_depth;
+      const int8_t* in_ptr3 = input_data + (p + 3) * input_depth;
+      const int8_t* w_ptr = w_ptr_base;
+
+      // Inner Loop: Input Channels
+      for (int ic = 0; ic < input_depth; ++ic) {
+        // [关键优化] 权重加载：对于 4 个像素，只加载 1 次！
+        // TFLite Weight: [Out, 1, 1, In] -> Stride access required across Out
+        vint8m1_t w_8 = __riscv_vlse8_v_i8m1(w_ptr + ic, w_stride, vl);
+        vint16m2_t w_16 = __riscv_vsext_vf2_i16m2(w_8, vl);
+
+        // 加载 4 个像素的输入 (Scalar Load)
+        int16_t in0 = (int16_t)in_ptr0[ic] + input_offset;
+        int16_t in1 = (int16_t)in_ptr1[ic] + input_offset;
+        int16_t in2 = (int16_t)in_ptr2[ic] + input_offset;
+        int16_t in3 = (int16_t)in_ptr3[ic] + input_offset;
+
+        // MAC: Vector += Scalar * Vector
+        acc0 = __riscv_vwmacc_vx_i32m4(acc0, in0, w_16, vl);
+        acc1 = __riscv_vwmacc_vx_i32m4(acc1, in1, w_16, vl);
+        acc2 = __riscv_vwmacc_vx_i32m4(acc2, in2, w_16, vl);
+        acc3 = __riscv_vwmacc_vx_i32m4(acc3, in3, w_16, vl);
+      }
+
+      // Quantize & Store
+      vint8m1_t out0 = QuantizeResult_m4(acc0, v_mult, v_lshift, v_rshift, output_offset, output_min, output_max, vl);
+      vint8m1_t out1 = QuantizeResult_m4(acc1, v_mult, v_lshift, v_rshift, output_offset, output_min, output_max, vl);
+      vint8m1_t out2 = QuantizeResult_m4(acc2, v_mult, v_lshift, v_rshift, output_offset, output_min, output_max, vl);
+      vint8m1_t out3 = QuantizeResult_m4(acc3, v_mult, v_lshift, v_rshift, output_offset, output_min, output_max, vl);
+
+      __riscv_vse8_v_i8m1(output_data + (p + 0) * output_depth + out_c, out0, vl);
+      __riscv_vse8_v_i8m1(output_data + (p + 1) * output_depth + out_c, out1, vl);
+      __riscv_vse8_v_i8m1(output_data + (p + 2) * output_depth + out_c, out2, vl);
+      __riscv_vse8_v_i8m1(output_data + (p + 3) * output_depth + out_c, out3, vl);
+    }
+
+    // 处理剩余像素 (Cleanup)
+    for (; p < num_pixels; ++p) {
+      vint32m4_t acc = bias_vec;
+      const int8_t* in_ptr = input_data + p * input_depth;
+      const int8_t* w_ptr = w_ptr_base;
+
+      for (int ic = 0; ic < input_depth; ++ic) {
+        vint8m1_t w_8 = __riscv_vlse8_v_i8m1(w_ptr + ic, w_stride, vl);
+        int16_t in_val = (int16_t)in_ptr[ic] + input_offset;
+        acc = __riscv_vwmacc_vx_i32m4(acc, in_val, __riscv_vsext_vf2_i16m2(w_8, vl), vl);
+      }
+      
+      vint8m1_t out = QuantizeResult_m4(acc, v_mult, v_lshift, v_rshift, output_offset, output_min, output_max, vl);
+      __riscv_vse8_v_i8m1(output_data + p * output_depth + out_c, out, vl);
+    }
+
+    out_c += vl;
+    out_c_rem -= vl;
+  }
+}
+
+// =========================================================
+// 4. 改进的通用卷积 Kernel (2x Unroll + Pointer Optimization)
+// =========================================================
+void ConvGeneralPerChannelRVV_Optimized(
+    const ConvParams& params, const int32_t* output_multiplier,
+    const int32_t* output_shift, const RuntimeShape& input_shape,
+    const int8_t* input_data, const RuntimeShape& filter_shape,
+    const int8_t* filter_data, const RuntimeShape& bias_shape,
+    const int32_t* bias_data, const RuntimeShape& output_shape,
+    int8_t* output_data) {
+
+  const int input_height = input_shape.Dims(1);
+  const int input_width = input_shape.Dims(2);
+  const int input_depth = input_shape.Dims(3);
+  const int output_height = output_shape.Dims(1);
+  const int output_width = output_shape.Dims(2);
+  const int output_depth = output_shape.Dims(3);
+  const int batches = input_shape.Dims(0);
+  
+  const int filter_height = filter_shape.Dims(1);
+  const int filter_width = filter_shape.Dims(2);
+  const int stride_h = params.stride_height;
+  const int stride_w = params.stride_width;
+  const int pad_h = params.padding_values.height;
+  const int pad_w = params.padding_values.width;
+
+  const int32_t input_offset = params.input_offset;
+  const int32_t output_offset = params.output_offset;
+  const int32_t output_min = params.quantized_activation_min;
+  const int32_t output_max = params.quantized_activation_max;
+
+  auto lshift_data = make_aligned_array<uint8_t>(16, output_depth);
+  auto rshift_data = make_aligned_array<uint8_t>(16, output_depth);
+  if (!lshift_data || !rshift_data) return;
+  PrepareShiftParams(lshift_data.get(), rshift_data.get(), output_shift, output_depth);
+
+  // Filter stride for jumping to the next output channel
+  const ptrdiff_t w_stride_oc = filter_height * filter_width * input_depth * sizeof(int8_t);
+
+  // --------------------------------------------------------
+  // Outer Loop: Output Channel Blocking
+  // --------------------------------------------------------
+  int out_c = 0;
+  size_t out_c_rem = output_depth;
+
+  while (out_c_rem > 0) {
+    // 使用 m4，如果发现寄存器溢出严重，可尝试改为 m2
+    const size_t vl = __riscv_vsetvl_e32m4(out_c_rem);
+
+    // 1. Preload Quant Params & Bias
+    vint32m4_t v_mult = __riscv_vle32_v_i32m4(output_multiplier + out_c, vl);
+    vuint8m1_t v_lshift_8 = __riscv_vle8_v_u8m1(lshift_data.get() + out_c, vl);
+    vuint8m1_t v_rshift_8 = __riscv_vle8_v_u8m1(rshift_data.get() + out_c, vl);
+    vuint32m4_t v_lshift = __riscv_vzext_vf4_u32m4(v_lshift_8, vl);
+    vuint32m4_t v_rshift = __riscv_vzext_vf4_u32m4(v_rshift_8, vl);
+
+    vint32m4_t bias_vec;
+    if (bias_data) bias_vec = __riscv_vle32_v_i32m4(bias_data + out_c, vl);
+    else bias_vec = __riscv_vmv_v_x_i32m4(0, vl);
+
+    // Current block weight base
+    const int8_t* w_base_block = filter_data + out_c * (filter_height * filter_width * input_depth);
+
+    // ------------------------------------------------------
+    // Loop Pixels
+    // ------------------------------------------------------
+    for (int b = 0; b < batches; ++b) {
+      for (int out_y = 0; out_y < output_height; ++out_y) {
+        
+        const int in_y_origin = out_y * stride_h - pad_h;
+        
+        // Output Row Base Pointer
+        int8_t* out_row_ptr = output_data + ((b * output_height + out_y) * output_width) * output_depth + out_c;
+
+        // [优化] 展开 Output Width 循环 (2x Unroll)
+        // 这样可以复用加载到寄存器的权重，减少 50% 的权重加载指令
+        int out_x = 0;
+        for (; out_x <= output_width - 2; out_x += 2) {
+            
+            vint32m4_t acc0 = bias_vec;
+            vint32m4_t acc1 = bias_vec;
+
+            const int in_x_origin_0 = out_x * stride_w - pad_w;
+            const int in_x_origin_1 = (out_x + 1) * stride_w - pad_w;
+
+            // Kernel Loop
+            for (int ky = 0; ky < filter_height; ++ky) {
+                const int in_y = in_y_origin + ky;
+                // 纵向边界检查 (对于两个像素都是一样的)
+                if (in_y < 0 || in_y >= input_height) continue;
+
+                // 预计算 Row Pointer
+                const int8_t* in_row_ptr = input_data + (b * input_height + in_y) * input_width * input_depth;
+
+                for (int kx = 0; kx < filter_width; ++kx) {
+                    const int in_x_0 = in_x_origin_0 + kx;
+                    const int in_x_1 = in_x_origin_1 + kx;
+
+                    // 检查两个像素的横向边界
+                    bool valid0 = (in_x_0 >= 0 && in_x_0 < input_width);
+                    bool valid1 = (in_x_1 >= 0 && in_x_1 < input_width);
+
+                    if (!valid0 && !valid1) continue;
+
+                    // 指针计算优化
+                    const int8_t* in_pixel_0 = in_row_ptr + in_x_0 * input_depth;
+                    const int8_t* in_pixel_1 = in_row_ptr + in_x_1 * input_depth;
+                    
+                    // Weight offset for this kernel position
+                    int w_offset_base = (ky * filter_width + kx) * input_depth;
+
+                    // Input Channel Loop
+                    for (int ic = 0; ic < input_depth; ++ic) {
+                        // 1. 加载权重 (昂贵操作：跨步加载) - 现在两个像素共享这一次加载!
+                        // 注意：这里仍然是瓶颈，但频率减半了
+                        vint8m1_t w_8 = __riscv_vlse8_v_i8m1(w_base_block + w_offset_base + ic, w_stride_oc, vl);
+                        vint16m2_t w_16 = __riscv_vsext_vf2_i16m2(w_8, vl);
+
+                        // 2. 像素 0 累加
+                        if (valid0) {
+                            int16_t in_val0 = (int16_t)in_pixel_0[ic] + input_offset;
+                            acc0 = __riscv_vwmacc_vx_i32m4(acc0, in_val0, w_16, vl);
+                        }
+
+                        // 3. 像素 1 累加
+                        if (valid1) {
+                            int16_t in_val1 = (int16_t)in_pixel_1[ic] + input_offset;
+                            acc1 = __riscv_vwmacc_vx_i32m4(acc1, in_val1, w_16, vl);
+                        }
+                    } // end ic
+                } // end kx
+            } // end ky
+
+            // Store Pixel 0
+            vint8m1_t out0 = QuantizeResult_m4(acc0, v_mult, v_lshift, v_rshift, output_offset, output_min, output_max, vl);
+            __riscv_vse8_v_i8m1(out_row_ptr + 0 * output_depth, out0, vl); // offset is relative to current out_c ptr
+
+            // Store Pixel 1
+            vint8m1_t out1 = QuantizeResult_m4(acc1, v_mult, v_lshift, v_rshift, output_offset, output_min, output_max, vl);
+            __riscv_vse8_v_i8m1(out_row_ptr + 1 * output_depth, out1, vl);
+
+            out_row_ptr += 2 * output_depth;
+        }
+
+        // 处理剩余的单个像素 (Remainder Loop)
+        for (; out_x < output_width; ++out_x) {
+             vint32m4_t acc = bias_vec;
+             const int in_x_origin = out_x * stride_w - pad_w;
+
+             for (int ky = 0; ky < filter_height; ++ky) {
+                const int in_y = in_y_origin + ky;
+                if (in_y < 0 || in_y >= input_height) continue;
+                
+                const int8_t* in_row_ptr = input_data + (b * input_height + in_y) * input_width * input_depth;
+
+                for (int kx = 0; kx < filter_width; ++kx) {
+                    const int in_x = in_x_origin + kx;
+                    if (in_x < 0 || in_x >= input_width) continue;
+
+                    const int8_t* in_pixel = in_row_ptr + in_x * input_depth;
+                    int w_offset_base = (ky * filter_width + kx) * input_depth;
+
+                    for (int ic = 0; ic < input_depth; ++ic) {
+                        vint8m1_t w_8 = __riscv_vlse8_v_i8m1(w_base_block + w_offset_base + ic, w_stride_oc, vl);
+                        int16_t in_val = (int16_t)in_pixel[ic] + input_offset;
+                        acc = __riscv_vwmacc_vx_i32m4(acc, in_val, __riscv_vsext_vf2_i16m2(w_8, vl), vl);
+                    }
+                }
+             }
+             vint8m1_t out = QuantizeResult_m4(acc, v_mult, v_lshift, v_rshift, output_offset, output_min, output_max, vl);
+             __riscv_vse8_v_i8m1(out_row_ptr, out, vl);
+             out_row_ptr += output_depth;
+        }
+      }
+    }
+
+    out_c += vl;
+    out_c_rem -= vl;
   }
 }
 
 }  // namespace
 
 // =========================================================
-// 3. 主逻辑 Dispatcher
+// 5. 主逻辑 Dispatcher
 // =========================================================
 
 void ConvPerChannel(
@@ -243,16 +429,22 @@ void ConvPerChannel(
   const int dilation_h = params.dilation_height_factor;
   const int dilation_w = params.dilation_width_factor;
 
-  // 检查是否为 1x1 卷积：Filter 1x1, Stride 1x1, Dilation 1x1
+  // Case 1: 1x1 Pointwise (极致优化)
   if (filter_h == 1 && filter_w == 1 && 
       stride_h == 1 && stride_w == 1 &&
       dilation_h == 1 && dilation_w == 1) {
-     Conv1x1PerChannelRVV(params, output_multiplier, output_shift, input_shape, 
+     Conv1x1PerChannelRVV_Optimized(params, output_multiplier, output_shift, input_shape, 
          input_data, filter_shape, filter_data, bias_shape, bias_data, 
          output_shape, output_data);
-  } else {
-     // 其他情况（3x3 或 通用尺寸），调用 TFLite 参考实现
-     // 如果未来实现了 3x3 优化，在此处添加分支
+  } 
+  // Case 2: 通用情况 (包括 Layer 0)
+  else if (dilation_h == 1 && dilation_w == 1) {
+     ConvGeneralPerChannelRVV_Optimized(params, output_multiplier, output_shift, input_shape, 
+         input_data, filter_shape, filter_data, bias_shape, bias_data, 
+         output_shape, output_data);
+  }
+  // Case 3: Fallback
+  else {
      tflite::reference_integer_ops::ConvPerChannel(
          params, output_multiplier, output_shift, input_shape, input_data,
          filter_shape, filter_data, bias_shape, bias_data, output_shape,
@@ -261,6 +453,7 @@ void ConvPerChannel(
 }
 
 TfLiteStatus ConvEval(TfLiteContext* context, TfLiteNode* node) {
+  // ... (保持原有的 Boilerplate 代码不变) ...
   TFLITE_DCHECK(node->user_data != nullptr);
   TFLITE_DCHECK(node->builtin_data != nullptr);
 
@@ -280,15 +473,11 @@ TfLiteStatus ConvEval(TfLiteContext* context, TfLiteNode* node) {
   TfLiteEvalTensor* output =
       GetEvalOutput(context, node, kConvOutputTensor);
 
-  // 检查数据类型支持：仅支持 Int8
   if (input->type != kTfLiteInt8 || filter->type != kTfLiteInt8 || output->type != kTfLiteInt8) {
      MicroPrintf("Type %s (%d) not supported by optimized Conv.", TfLiteTypeGetName(input->type), input->type);
      return kTfLiteError;
   }
 
-  // 重构 ConvParams
-  // 注意：这里手动构建 ConvParams 是为了兼容性，确保参数传递正确。
-  // 在原始代码中通常使用 ConvParamsQuantized(params, data)，但其位于 reference 实现中可能无法内联。
   tflite::ConvParams op_params;
   op_params.padding_type = tflite::PaddingType::kSame; 
   op_params.padding_values.width = data.padding.width;
