@@ -387,3 +387,51 @@ cocotb_test_suite(
     vcs_verilog_sources = ["//hdl/chisel/src/coralnpu:rvv_core_mini_highmem_axi_cc_library_verilog"],
     verilator_model = "//tests/cocotb:rvv_core_mini_highmem_axi_model",
 )
+
+# ==============================================================================
+# 5. SOFTMAX
+# ==============================================================================
+coralnpu_v2_binary(
+    name = "softmax_test",
+    srcs = ["softmax_test.cc"], 
+    itcm_size_kbytes = 1024,
+    dtcm_size_kbytes = 1024,
+    deps = [
+        "//sw/opt/litert-micro:softmax", 
+        "@tflite_micro//tensorflow/lite/kernels/internal:reference_base"
+    ],
+)
+
+cocotb_test_suite(
+    name = "cocotb_softmax",
+    simulators = [
+        "verilator",
+        "vcs",
+    ],
+    testcases = [
+        "test_softmax_small_depth",
+        "test_softmax_large_depth",
+        "test_softmax_batch",
+    ],
+    tests_kwargs = {
+        "waves": False,
+        "hdl_toplevel": "RvvCoreMiniHighmemAxi",
+        "size": "enormous",
+        "default_testcase_size": "medium",
+        "test_module": ["cocotb_softmax.py"], 
+        "deps": [
+            "//coralnpu_test_utils:core_mini_axi_sim_interface",
+            "//coralnpu_test_utils:sim_test_fixture",
+            "@rules_python//python/runfiles",
+        ],
+        "data": ["softmax_test.elf"],
+    },
+    vcs_build_args = VCS_BUILD_ARGS,
+    vcs_data = glob(["**/*.elf"]) + [
+        "//tests/cocotb:coverage_exclude.cfg",
+    ],
+    vcs_defines = VCS_DEFINES,
+    vcs_test_args = VCS_TEST_ARGS,
+    vcs_verilog_sources = ["//hdl/chisel/src/coralnpu:rvv_core_mini_highmem_axi_cc_library_verilog"],
+    verilator_model = "//tests/cocotb:rvv_core_mini_highmem_axi_model",
+)
