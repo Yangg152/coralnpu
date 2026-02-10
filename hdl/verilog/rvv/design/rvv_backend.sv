@@ -336,6 +336,26 @@ module rvv_backend
     logic        [`NUM_RT_UOP-1:0]        wr_valid_rt2vrf;
     RT2VRF_t     [`NUM_RT_UOP-1:0]        wr_data_rt2vrf;
 
+  //luoyang_start
+  // MXU_RS (Reservation Station) to MXU (Execution Unit)
+    logic        [`NUM_MXU-1:0]           pop_mxu2rs;
+    MXU_RS_t     [`NUM_MXU-1:0]           uop_rs2mxu; // 这里面包含了从 VRF 读出的源操作数
+    logic                                 fifo_empty_rs2mxu;
+    logic        [`NUM_MXU-1:0]           fifo_almost_empty_rs2mxu;
+    
+  // MXU to ROB (Re-Order Buffer)
+    logic        [`NUM_MXU-1:0]           wr_valid_mxu2rob;
+    PU2ROB_t     [`NUM_MXU-1:0]           wr_mxu2rob;
+    logic        [`NUM_MXU-1:0]           wr_ready_rob2mxu;
+
+  // Dispatch to MXU_RS (需要在 Dispatch 模块增加对应端口)
+    logic                                 mxu_rs_full;
+    logic        [`NUM_DP_UOP-1:0]        mxu_rs_almost_full;
+    logic        [`NUM_DP_UOP-1:0]        rs_valid_dp2mxu;
+    MXU_RS_t     [`NUM_DP_UOP-1:0]        rs_dp2mxu;
+    logic        [`NUM_DP_UOP-1:0]        rs_ready_mxu2dp;
+  //luoyang_end
+
   // trap handler
     logic                                 trap_en;
     logic                                 is_trapping;
@@ -509,6 +529,14 @@ module rvv_backend
         .rd_index_dp2vrf    (rd_index_dp2vrf),
         .rd_data_vrf2dp     (rd_data_vrf2dp),
         .v0_mask_vrf2dp     (v0_mask_vrf2dp),
+
+      //luoyang_start
+      // Dispatch to MXU_RS
+        .rs_valid_dp2mxu    (rs_valid_dp2mxu),
+        .rs_dp2mxu          (rs_dp2mxu),
+        .rs_ready_mxu2dp    (rs_ready_mxu2dp),
+      //luyang_end
+
       // ROB to dispatch
         .rob_entry          (uop_rob2dp)
     );
@@ -957,6 +985,14 @@ module rvv_backend
         .rd_ready_rt2rob        (rd_ready_rt2rob),
       // ROB to DP
         .uop_rob2dp             (uop_rob2dp),
+
+      //luoyang_start
+      // MXU to ROB
+        .wr_valid_mxu2rob       (wr_valid_mxu2rob),
+        .wr_mxu2rob             (wr_mxu2rob),
+        .wr_ready_rob2mxu       (wr_ready_rob2mxu),
+      //luoyang_end
+
       // Trap
         .trap_valid_rmp2rob     (trap_valid_rmp2rob),
         .trap_rob_entry_rmp2rob (trap_rob_entry_rmp2rob),
@@ -1004,6 +1040,68 @@ module rvv_backend
         .rt2vrf_wr_valid (wr_valid_rt2vrf),
         .rt2vrf_wr_data  (wr_data_rt2vrf)
     );
+
+// luoyang_begin
+    // MXU RS (Matrix Unit Reservation Station)
+    // 作用：缓存从 Dispatch 发来的指令和 VRF 数据，准备喂给 Router
+    multi_fifo #(
+        .T              (MXU_RS_t),      // 你需要在 define 文件里定义这个结构体
+        .M              (`NUM_DP_UOP),
+        .N              (`NUM_MXU),
+        .DEPTH          (`MXU_RS_DEPTH), // 定义深度，例如 4 或 8
+        .CHAOS_PUSH     (1'b1)
+    ) u_mxu_rs (
+      // global
+        .clk            (clk),
+        .rst_n          (rst_n),
+      // write (From Dispatch)
+        .push           (rs_valid_dp2mxu),
+        .datain         (rs_dp2mxu),
+      // read (To MXU Router)
+        .pop            (pop_mxu2rs),
+        .dataout        (uop_rs2mxu),
+      // fifo status
+        .full           (mxu_rs_full),
+        .almost_full    (mxu_rs_almost_full),
+        .empty          (fifo_empty_rs2mxu),
+        .almost_empty   (fifo_almost_empty_rs2mxu),
+      // flush
+        .clear          (trap_flush_rvv),
+        .fifo_data      (),
+        .wptr           (),
+        .rptr           (),
+        .entry_count    ()
+    );
+
+    generate
+      for (i=1; i<`NUM_DP_UOP; i++) begin: mxu_rs_ready
+        assign rs_ready_mxu2dp[i] = !mxu_rs_almost_full[i];
+      end
+    endgenerate
+
+    // Flex-MXU Execution Unit
+    // 包含：Lightweight Operand Router + 16x16 Systolic Array
+    rvv_backend_mxu u_mxu (
+      .clk                        (clk),
+      .rst_n                      (rst_n),
+      
+      // 1. 输入侧：连接到 MXU_RS
+      // Router 的输入数据源就在这里！uop_rs2mxu 包含了 vs1_data (VRF数据)
+      .pop_ex2rs                  (pop_mxu2rs), 
+      .mxu_uop_rs2ex              (uop_rs2mxu), 
+      .fifo_empty_rs2ex           (fifo_empty_rs2mxu),
+      
+      // 2. 输出侧：连接到 ROB (写回结果)
+      .result_valid_ex2rob        (wr_valid_mxu2rob),
+      .result_ex2rob              (wr_mxu2rob),
+      .result_ready_rob2mxu       (wr_ready_rob2mxu),
+      
+      // 3. 全局控制
+      .trap_flush_rvv             (trap_flush_rvv)
+    );
+
+
+// luoyang_end
 
   // retire information
 `ifdef TB_SUPPORT

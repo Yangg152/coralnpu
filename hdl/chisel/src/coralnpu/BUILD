@@ -137,6 +137,7 @@ chisel_library(
         "//hdl/verilog/rvv/design:rvv_backend_mul_unit.sv",
         "//hdl/verilog/rvv/design:rvv_backend_mul_unit_mul8.sv",
         "//hdl/verilog/rvv/design:rvv_backend_mulmac.sv",
+        "//hdl/verilog/rvv/design:rvv_backend_mxu.sv",
         "//hdl/verilog/rvv/design:rvv_backend_pmtrdt.sv",
         "//hdl/verilog/rvv/design:rvv_backend_pmtrdt_unit.sv",
         "//hdl/verilog/rvv/design:rvv_backend_retire.sv",

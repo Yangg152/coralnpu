@@ -47,6 +47,7 @@ exports_files(
         "rvv_backend_mul_unit.sv",
         "rvv_backend_mul_unit_mul8.sv",
         "rvv_backend_mulmac.sv",
+        "rvv_backend_mxu.sv",
         "rvv_backend_pmtrdt.sv",
         "rvv_backend_pmtrdt_unit.sv",
         "rvv_backend_retire.sv",

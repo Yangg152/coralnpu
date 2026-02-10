@@ -57,6 +57,12 @@ module rvv_backend_dispatch
     rd_index_dp2vrf,        
     rd_data_vrf2dp,
     v0_mask_vrf2dp,
+    //luoyang_start
+    // [新增] Dispatch unit to MXU reservation station
+    rs_valid_dp2mxu,
+    rs_dp2mxu,
+    rs_ready_mxu2dp,   
+    //luoyang_end 
     rob_entry
 );  
 // ---port definition-------------------------------------------------
@@ -117,6 +123,11 @@ module rvv_backend_dispatch
 // Dispatch unit accept all ROB entry to determine if vs_data of RS is from ROB or not
 // ROB unit to Dispatch unit
     input  ROB2DP_t     [`ROB_DEPTH-1:0]          rob_entry;
+
+// MXU端口定义
+    output logic          [`NUM_DP_UOP-1:0]       rs_valid_dp2mxu;
+    output MXU_RS_t       [`NUM_DP_UOP-1:0]       rs_dp2mxu;      // 使用之前定义的 MXU_RS_t
+    input  logic          [`NUM_DP_UOP-1:0]       rs_ready_mxu2dp;
 
 // ---internal signal definition--------------------------------------
     SUC_UOP_RAW_t       [`NUM_DP_UOP-1:0]   suc_uop;
@@ -290,7 +301,10 @@ module rvv_backend_dispatch
         .rs_ready_lsu2dp        (rs_ready_lsu2dp),
         .mapinfo_valid_dp2lsu   (mapinfo_valid_dp2lsu),
         .mapinfo_ready_lsu2dp   (mapinfo_ready_lsu2dp),
-        .uop_valid_dp2rob       (uop_valid_dp2rob),
+        // [新增] MXU Handshake signals (需要在 ctrl 模块内部实现 enable 逻辑)
+        .rs_valid_dp2mxu        (rs_valid_dp2mxu),
+        .rs_ready_mxu2dp        (rs_ready_mxu2dp),  
+        .uop_valid_dp2rob       (uop_valid_dp2rob),      
         .uop_ready_rob2dp       (uop_ready_rob2dp)
     );
 
@@ -440,6 +454,34 @@ module rvv_backend_dispatch
             assign mapinfo_dp2lsu[i].lsu_class           = uop_uop2dp[i].uop_funct6.lsu_funct6.lsu_is_store;
             assign mapinfo_dp2lsu[i].vregfile_write_addr = uop_uop2dp[i].vd_index;
 
+           // MXU RS Payload Assignment
+`ifdef TB_SUPPORT
+            assign rs_dp2mxu[i].uop_pc         = uop_uop2dp[i].uop_pc; 
+`endif
+            assign rs_dp2mxu[i].rob_entry      = rob_address[i]; 
+            assign rs_dp2mxu[i].uop_funct6     = uop_uop2dp[i].uop_funct6;
+            assign rs_dp2mxu[i].uop_funct3     = uop_uop2dp[i].uop_funct3;
+            
+            // 关键：数据通路 (VRF Read Data -> RS)
+            assign rs_dp2mxu[i].vs1_data       = uop_operand[i].vs1; // Router Input
+            assign rs_dp2mxu[i].vs1_data_valid = uop_uop2dp[i].vs1_index_valid;
+            
+            assign rs_dp2mxu[i].vs2_data       = uop_operand[i].vs2; // Accumulator
+            assign rs_dp2mxu[i].vs2_data_valid = uop_uop2dp[i].vs2_valid;
+            assign rs_dp2mxu[i].vs2_eew        = uop_uop2dp[i].vs2_eew;
+            
+            assign rs_dp2mxu[i].rs1_data       = uop_uop2dp[i].rs1_data; // Scalar
+            assign rs_dp2mxu[i].rs1_data_valid = uop_uop2dp[i].rs1_data_valid;
+            
+            assign rs_dp2mxu[i].uop_index      = uop_uop2dp[i].uop_index;
+
+            // 在 Dispatch 模块的 gen_output_sig 中
+            assign rs_dp2mxu[i].subop          = uop_uop2dp[i].mxu_ctrl.subop;
+            assign rs_dp2mxu[i].acc_en         = uop_uop2dp[i].mxu_ctrl.acc_en;
+            assign rs_dp2mxu[i].route_mode     = uop_uop2dp[i].mxu_ctrl.route_mode;
+            assign rs_dp2mxu[i].weight_idx     = uop_uop2dp[i].mxu_ctrl.weight_idx;
+            assign rs_dp2mxu[i].mode_wide      = uop_uop2dp[i].mxu_ctrl.mode_wide;
+
           // ROB
 `ifdef TB_SUPPORT
             assign uop_dp2rob[i].uop_pc         = uop_uop2dp[i].uop_pc; 
@@ -450,6 +492,7 @@ module rvv_backend_dispatch
             assign uop_dp2rob[i].vector_csr     = uop_uop2dp[i].vector_csr;
             assign uop_dp2rob[i].last_uop_valid = uop_uop2dp[i].last_uop_valid;
         end
+
     endgenerate
 
 endmodule

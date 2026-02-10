@@ -122,7 +122,11 @@ module rvv_backend_decode_unit_ari
   logic   [`NUM_DE_UOP-1:0]                           first_uop_valid;    
   logic   [`NUM_DE_UOP-1:0]                           last_uop_valid;     
   logic   [`NUM_DE_UOP-1:0][$clog2(`EMUL_MAX)-1:0]    seg_field_index;
-  logic   [`NUM_DE_UOP-1:0]                           pshrob_valid;     
+  logic   [`NUM_DE_UOP-1:0]                           pshrob_valid; 
+
+  // luoyang_start
+  MXU_CTRL_t      [`NUM_DE_UOP-1:0]                   mxu_ctrl;
+  // luoyang_end    
 
   // use for for-loop 
   genvar                                              j;
@@ -201,7 +205,11 @@ module rvv_backend_decode_unit_ari
           VMAX,
           VSSUBU,
           VSSUB,
-          VSMUL_VMVNRR: begin
+          VSMUL_VMVNRR,
+          // luoyang_start
+          MXU_OP_MMA_DEEP,
+          MXU_OP_MMA_WIDE,
+          MXU_OP_WLOAD: begin // MXU uses standard LMUL rules
             case(csr_lmul)
               LMUL1_4,
               LMUL1_2,
@@ -219,7 +227,8 @@ module rvv_backend_decode_unit_ari
               end
             endcase
           end
-
+          // luoyang_end
+          
           // destination vector register is mask register
           VMADC,
           VMSEQ,
@@ -454,7 +463,11 @@ module rvv_backend_decode_unit_ari
           VRSUB,
           VSLIDEDOWN,
           VSMUL_VMVNRR,
-          VSLIDEUP_RGATHEREI16: begin        
+          VSLIDEUP_RGATHEREI16,
+          // luoyang_start
+          MXU_OP_MMA_DEEP,
+          MXU_OP_MMA_WIDE,
+          MXU_OP_WLOAD: begin // MXU via OPIVX
             case(csr_lmul)
               LMUL1_4,
               LMUL1_2,
@@ -470,7 +483,8 @@ module rvv_backend_decode_unit_ari
               end
             endcase
           end
-
+          // luoyang_end
+          
           // destination vector register is mask register
           VMADC,
           VMSEQ,
@@ -1223,6 +1237,34 @@ module rvv_backend_decode_unit_ari
               end
             endcase
           end
+          // luoyang_start: Flex-MXU Extensions
+          
+          // --- 1. 矩阵运算指令 (MMA) ---
+          MXU_OP_MMA_DEEP,
+          MXU_OP_MMA_WIDE: begin
+            // 规格: INT8 Input -> INT32 Accumulator (Widening)
+            // 编码: OPIVX 格式 (rs1=WeightIdx), vs1 字段作为 Control Flags (Immediate)
+            
+            // 强制定义计算宽度，忽略 csr_sew，或者假定软件已设置 correct SEW
+            // 建议：硬件强制锁定宽度以匹配 Systolic Array 物理特性
+            eew_vs2     = EEW8;   // Input Activation (INT8)
+            eew_vd      = EEW32;  // Output Accumulator (INT32)
+            eew_max     = EEW32;  // 用于最大宽度检查
+            
+            // 注意: 不设置 eew_vs1。
+            // 因为规格书中 vs1[4:0] 是路由控制位的立即数，不需要读取向量寄存器。
+          end
+
+          // --- 2. 权重加载指令 (WLOAD) ---
+          MXU_OP_WLOAD: begin
+            // 规格: Load Weight to Internal SRAM.
+            // 操作数: rs1 (Scalar Base), imm (Buffer ID)
+            // 行为: 不读 VRF (vs2)，不写 VRF (vd)。
+            
+            // 此处留空或仅做标记。
+            // 确保不要设置 eew_vd/vs2/vs1，防止 Hazard Unit 误判依赖。
+          end
+          // luoyang_end
           
           VSUB,
           VSBC,
@@ -2312,6 +2354,17 @@ module rvv_backend_decode_unit_ari
             // destination register group cannot overlap the source register group
             check_special = check_vd_overlap_v0&check_vd_overlap_vs2&check_vd_overlap_vs1;
           end
+
+          // luoyang_start
+          MXU_OP_MMA_DEEP,
+          MXU_OP_MMA_WIDE,
+          MXU_OP_WLOAD: begin
+            // Check overlaps for MXU. 
+            // Typically destination (acc) cannot overlap sources if not fully supported.
+            // Assuming strict no-overlap for safety in initial implementation.
+            check_special = check_vd_overlap_v0 & check_vd_overlap_vs2;
+          end
+          // luoyang_end
         endcase
       end
       OPIVX: begin
@@ -2404,6 +2457,14 @@ module rvv_backend_decode_unit_ari
             // destination register group cannot overlap the source register group
             check_special = check_vd_overlap_v0&check_vd_overlap_vs2;
           end
+
+          // luoyang_start
+          MXU_OP_MMA_DEEP,
+          MXU_OP_MMA_WIDE,
+          MXU_OP_WLOAD: begin
+            check_special = check_vd_overlap_v0 & check_vd_overlap_vs2;
+          end
+          // luoyang_end
         endcase
       end
       OPIVI: begin
@@ -2949,6 +3010,14 @@ module rvv_backend_decode_unit_ari
                 end
               endcase
             end
+
+            // luoyang_start
+            MXU_OP_MMA_DEEP,
+            MXU_OP_MMA_WIDE,
+            MXU_OP_WLOAD: begin
+              uop_exe_unit[i] = MXU;
+            end
+            // luoyang_end
           endcase
         end
 
@@ -3252,6 +3321,15 @@ module rvv_backend_decode_unit_ari
                 end
               endcase
             end
+
+            // luoyang_start
+            MXU_OP_MMA_DEEP,
+            MXU_OP_MMA_WIDE,
+            MXU_OP_WLOAD: begin
+               // Treat MXU op as Vector-Scalar-Like if opcode is in VS1/RS1
+               uop_class[i] = XVX;
+            end
+            // luoyang_end
           endcase
         end
 
@@ -3685,6 +3763,18 @@ module rvv_backend_decode_unit_ari
                 end 
               endcase
             end
+            // luoyang_start
+            MXU_OP_MMA_DEEP,
+            MXU_OP_MMA_WIDE: begin
+               vd_offset[i] = uop_index_current[i][`UOP_INDEX_WIDTH_ALU-1:0];
+               vd_valid[i]  = 1'b1;
+            end
+            MXU_OP_WLOAD: begin
+               // WLOAD typically loads weights internally, may not write back to VRF
+               vd_offset[i] = 'b0;
+               vd_valid[i]  = 1'b0; 
+            end
+            // luoyang_end
 
             VSUB,
             VSBC,
@@ -4142,6 +4232,16 @@ module rvv_backend_decode_unit_ari
                 end
               endcase
             end
+
+            // luoyang_start
+            MXU_OP_MMA_DEEP,
+            MXU_OP_MMA_WIDE,
+            MXU_OP_WLOAD: begin
+               // In MXU, VS1 is used for sub-opcode control, not as a register index
+               vs1_offset[i]      = 'b0;
+               vs1_index_valid[i] = 1'b0; 
+            end
+            // luoyang_end
           endcase
         end
 
@@ -4244,6 +4344,18 @@ module rvv_backend_decode_unit_ari
     
     for(int i=0;i<`NUM_DE_UOP;i++) begin: GET_VS1_OPCODE
       case(inst_funct3)
+        OPIVV: begin
+          case(funct6_ari.ari_funct6)
+            // luoyang_start
+            MXU_OP_MMA_DEEP,
+            MXU_OP_MMA_WIDE,
+            MXU_OP_WLOAD: begin
+               vs1_opcode_valid[i] = 1'b1;
+            end
+            // luoyang_end
+          endcase
+        end
+
         OPIVI: begin
           case(funct6_ari.ari_funct6)
             VSMUL_VMVNRR: begin
@@ -4325,6 +4437,14 @@ module rvv_backend_decode_unit_ari
                 end
               endcase
             end
+            // luoyang_start
+            MXU_OP_MMA_DEEP,
+            MXU_OP_MMA_WIDE,
+            MXU_OP_WLOAD: begin
+               vs2_offset[i] = uop_index_current[i][`UOP_INDEX_WIDTH_ALU-1:0];
+               vs2_valid[i]  = 1'b1;
+            end
+            // luoyang_end
             
             VSUB,
             VSBC,
@@ -4632,6 +4752,17 @@ module rvv_backend_decode_unit_ari
                 end
               endcase
             end
+            
+            // luoyang_start
+            MXU_OP_MMA_DEEP,
+            MXU_OP_MMA_WIDE,
+            MXU_OP_WLOAD: begin
+              if(inst_funct3 == OPIVX) begin
+                 rs1_data[i]       = rs1;
+                 rs1_data_valid[i] = 1'b1;
+              end
+            end
+            // luoyang_end
           
             VSUB,
             VSBC,
@@ -4785,6 +4916,71 @@ module rvv_backend_decode_unit_ari
     end
   end
 
+  // luoyang_start
+  // Generate MXU control signals
+  always_comb begin
+    for(int i=0; i<`NUM_DE_UOP; i++) begin: GEN_MXU_CTRL
+      mxu_ctrl[i] = '0; // Default clear (all 0s)
+      
+      if (uop_exe_unit[i] == MXU) begin
+          // 使用 funct6 (ari_funct6) 来区分具体指令类型
+          // 注意：假设 uop_funct6 是 union，我们需要访问 ari_funct6 字段
+          case (uop_funct6[i].ari_funct6)
+            
+            // ============================================================
+            // 1. 深度模式计算 (16x16 Deep Mode)
+            // ============================================================
+            MXU_OP_MMA_DEEP: begin
+                mxu_ctrl[i].mode_wide  = 1'b0;                  // 0 = 16x16
+                mxu_ctrl[i].subop      = mxu_subop_e'(vs1[i][2:0]); // 从 vs1 解码
+                mxu_ctrl[i].route_mode = mxu_route_e'(vs1[i][4:3]); // 从 vs1 解码
+                mxu_ctrl[i].acc_en     = !vm[i];                // 0=Masked(Acc), 1=Overwrite
+                
+                // 如果是 OPIVX 格式，权重索引在 rs1 中
+                if (uop_funct3[i] == OPIVX) begin
+                    mxu_ctrl[i].weight_idx = rs1_data[i][15:0];
+                end
+            end
+
+            // ============================================================
+            // 2. 宽模式计算 (4x64 Wide Mode) - 首层卷积专用
+            // ============================================================
+            MXU_OP_MMA_WIDE: begin
+                mxu_ctrl[i].mode_wide  = 1'b1;                  // 1 = 4x64
+                mxu_ctrl[i].subop      = mxu_subop_e'(vs1[i][2:0]); // 从 vs1 解码
+                mxu_ctrl[i].route_mode = mxu_route_e'(vs1[i][4:3]); // 从 vs1 解码
+                mxu_ctrl[i].acc_en     = !vm[i];
+                
+                if (uop_funct3[i] == OPIVX) begin
+                    mxu_ctrl[i].weight_idx = rs1_data[i][15:0];
+                end
+            end
+
+            // ============================================================
+            // 3. 权重加载 (Weight Load)
+            // ============================================================
+            MXU_OP_WLOAD: begin
+                // 【核心补全】：强制设置 subop 为 WLOAD，不依赖 vs1
+                mxu_ctrl[i].subop      = MXU_WLOAD; 
+                mxu_ctrl[i].mode_wide  = 1'b0; // Load 模式下该位无关，给默认值
+                mxu_ctrl[i].route_mode = MXU_ROUTE_PASS; // 默认路由
+                mxu_ctrl[i].acc_en     = 1'b0;
+                
+                // 加载地址/索引通常来自 rs1 (基地址) 或者 imm
+                // 假设 OPIVX 格式：rs1_data 是权重 Buffer 的目标索引
+                mxu_ctrl[i].weight_idx = rs1_data[i][15:0];
+            end
+
+            default: begin
+               // 异常处理：未知的 MXU 操作码
+               mxu_ctrl[i] = '0;
+            end
+          endcase
+      end
+    end
+  end
+  // luoyang_end
+
   // assign result to output
   generate
     for(j=0;j<`NUM_DE_UOP;j++) begin: ASSIGN_RES
@@ -4822,7 +5018,10 @@ module rvv_backend_decode_unit_ari
       assign uop[j].first_uop_valid     = first_uop_valid[j];   
       assign uop[j].last_uop_valid      = last_uop_valid[j];    
       assign uop[j].seg_field_index     = seg_field_index[j];   
-      assign uop[j].pshrob_valid        = pshrob_valid[j];   
+      assign uop[j].pshrob_valid        = pshrob_valid[j];
+      // luoyang_start
+      assign uop[j].mxu_ctrl            = mxu_ctrl[j];
+      // luoyang_end
     end
   endgenerate
 

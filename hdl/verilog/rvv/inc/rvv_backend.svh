@@ -88,7 +88,7 @@ typedef struct packed {
 // DE stage, Command Queue to Uops Queue
 //
 // execution unit
-typedef enum logic [2:0] {
+typedef enum logic [3:0] {
   ALU,
   MUL,
   MAC,
@@ -96,8 +96,41 @@ typedef enum logic [2:0] {
   RDT,
   CMP,
   DIV,
-  LSU
+  LSU,
+  //luoyang_start
+  MXU
+  //luoyang_end
 } EXE_UNIT_e;
+
+// =========================================================================
+// [Move Up] Flex-MXU Definitions (Moved here to be used in UOP_QUEUE_t)
+// =========================================================================
+
+// MXU Sub-opcode to identify specific matrix operations
+typedef enum logic [2:0] {
+  MXU_NOP   = 3'b000,
+  MXU_MMA   = 3'b001, // Matrix Multiply-Accumulate (C += A * B)
+  MXU_WLOAD = 3'b010 // Weight Load (Load data to internal SRAM)
+} mxu_subop_e;
+
+// MXU Router Mode (Controls the Lightweight Operand Router)
+typedef enum logic [1:0] {
+  MXU_ROUTE_PASS  = 2'b00, // Pass-through: Standard 16x16 Systolic
+  MXU_ROUTE_BCAST = 2'b01, // Broadcast: 1x1 Conv or Matrix-Vector (Scalar/Vector broadcast)
+  MXU_ROUTE_SHUFF = 2'b10  // Shuffle: RGB Interleaved or Wide-Mode (4x64) mapping
+} mxu_route_e;
+
+// [New] Structure to hold MXU control signals within UOP_QUEUE_t
+typedef struct packed {
+  mxu_subop_e    subop;       // Operation type
+  mxu_route_e    route_mode;  // Mux selection
+  logic          acc_en;      // Accumulate enable
+  logic          mode_wide;   // Wide mode enable
+  logic [15:0]   weight_idx;  // Decoded immediate/index for weights
+} MXU_CTRL_t;
+
+// =========================================================================
+
 
 // when EXE_UNIT_e is not LSU, it is used to distinguish arithmetic instructions, based on inst_encoding[14:12]
   parameter  OPIVV=3'b000;      // vs2,      vs1, vd.
@@ -208,6 +241,18 @@ typedef enum logic [2:0] {
   parameter VWMACC          =   6'b111_101;
   parameter VWMACCUS        =   6'b111_110;
   parameter VWMACCSU        =   6'b111_111;  
+
+  // luoyang_start
+  // =========================================================================
+  // Flex-MXU Instruction Opcodes (Funct6 Definitions)
+  // =========================================================================
+  // Maps to "OPMVV" (010) or "OPIVV" (000) depending on your implementation
+  // These 6-bit values differentiate the modes stateless-ly.
+  
+  parameter MXU_OP_MMA_DEEP = 6'b001_101; // 16x16 Mode (Standard)
+  parameter MXU_OP_MMA_WIDE = 6'b010_101; // 4x64 Mode (Wide/First-Layer)
+  parameter MXU_OP_WLOAD    = 6'b010_110; // Weight Load Instruction
+  // luoyang_end  
 
 // vwxunary0, the uop could be vcpop.m, vfirst.m and vmv. They can be distinguished by vs1 field(inst_encoding[19:15]).
   parameter VMV_X_S         =   5'b00000;
@@ -371,6 +416,11 @@ typedef struct packed {
   logic                               last_uop_valid;     // one instruction may be split to many uops, this signal is used to specify the last uop in those uops of one instruction.
   logic   [$clog2(`EMUL_MAX)-1:0]     seg_field_index;    // used for calculate v0_start in DP stage for segment ld/st
   logic                               pshrob_valid;       // wheather this uop is pushed into ROB.
+
+  // luoyang_start
+  // [Added for Scheme 1] Pass decoded MXU control signals to Dispatch/RS
+  MXU_CTRL_t                          mxu_ctrl;
+  // luoyang_end
 } UOP_QUEUE_t;    
 
 // specify whether the current byte belongs to 'prestart' or 'body-inactive' or 'body-active' or 'tail'
@@ -656,5 +706,49 @@ typedef struct packed {
   logic   [`VLEN-1:0]                 rt_data;
   logic   [`VLENB-1:0]                rt_strobe; 
 }RT2VRF_t;
+
+// luoyang_start
+
+// MXU Reservation Station Data Structure
+typedef struct packed {
+`ifdef TB_SUPPORT
+  logic   [`PC_WIDTH-1:0]             uop_pc;
+`endif
+  logic   [`ROB_DEPTH_WIDTH-1:0]      rob_entry;      // Used for Out-of-Order retirement tracking
+  
+  // Standard RVV decoding info
+  FUNCT6_u                            uop_funct6;
+  logic   [`FUNCT3_WIDTH-1:0]         uop_funct3;
+  
+  // MXU Specific Control Signals
+  mxu_subop_e                         subop;          // Operation type
+  mxu_route_e                         route_mode;     // Mux selection for the Input Router
+  logic                               acc_en;         // 1: Accumulate (+=), 0: Overwrite (=)
+  logic   [15:0]                      weight_idx;     // Internal Weight SRAM address (from immediate)
+  logic                               mode_wide;      // 0: 16x16 Mode, 1: 4x64 Wide Mode
+
+  // Source Operand 1: Input Activations / Pixels (From VRF)
+  // The Router will slice/shuffle this 128-bit data before feeding the array
+  logic   [`VLEN-1:0]                 vs1_data;           
+  logic                               vs1_data_valid; 
+
+  // Source Operand 2: Current Accumulator / Bias (From VRF)
+  // Used for C = C + ... operations
+  logic   [`VLEN-1:0]                 vs2_data;	        
+  logic                               vs2_data_valid; 
+  EEW_e                               vs2_eew;        // Element width (usually 32b for Acc)
+
+  // Source Operand 3 / Scalar: Optional (From XRF or Imm)
+  // Can be used for Broadcast values or configuration data
+  logic   [`XLEN-1:0] 	              rs1_data;          
+  logic          	                  rs1_data_valid;   
+
+  // Uop Index tracking
+  logic   [`UOP_INDEX_WIDTH-1:0]      uop_index;
+
+} MXU_RS_t;
+
+// luoyang_end
+
 
 `endif  // HDL_VERILOG_RVV_DESIGN_RVV_SVH
