@@ -455,32 +455,29 @@ module rvv_backend_dispatch
             assign mapinfo_dp2lsu[i].vregfile_write_addr = uop_uop2dp[i].vd_index;
 
            // MXU RS Payload Assignment
+           // 对应 rvv_backend.svh 中 MXU_RS_t 的定义
 `ifdef TB_SUPPORT
             assign rs_dp2mxu[i].uop_pc         = uop_uop2dp[i].uop_pc; 
 `endif
             assign rs_dp2mxu[i].rob_entry      = rob_address[i]; 
             assign rs_dp2mxu[i].uop_funct6     = uop_uop2dp[i].uop_funct6;
             assign rs_dp2mxu[i].uop_funct3     = uop_uop2dp[i].uop_funct3;
-            
-            // 关键：数据通路 (VRF Read Data -> RS)
-            assign rs_dp2mxu[i].vs1_data       = uop_operand[i].vs1; // Router Input
-            assign rs_dp2mxu[i].vs1_data_valid = uop_uop2dp[i].vs1_index_valid;
-            
-            assign rs_dp2mxu[i].vs2_data       = uop_operand[i].vs2; // Accumulator
+            // 1. Control Packet (直接传递打包好的控制结构体)
+            assign rs_dp2mxu[i].ctrl           = uop_uop2dp[i].mxu_ctrl;
+            // 2. Source 1: Input Activations (对应指令的 vs2 字段)
+            // Dispatch 模块已经从 VRF 读出了 vs2 的数据放在 uop_operand[i].vs2 中
+            assign rs_dp2mxu[i].vs2_data       = uop_operand[i].vs2; 
             assign rs_dp2mxu[i].vs2_data_valid = uop_uop2dp[i].vs2_valid;
-            assign rs_dp2mxu[i].vs2_eew        = uop_uop2dp[i].vs2_eew;
-            
-            assign rs_dp2mxu[i].rs1_data       = uop_uop2dp[i].rs1_data; // Scalar
+           // 3. Source 2: Accumulator / Old Value (对应指令的 vd 字段，用于读改写)
+            // 当 decode 阶段设置了 vs3_valid=1 时，uop_operand[i].vd 中会包含 vd 的旧值
+            assign rs_dp2mxu[i].vd_old_data       = uop_operand[i].vd; 
+            assign rs_dp2mxu[i].vd_old_data_valid = uop_uop2dp[i].vs3_valid;
+            // 4. Source 3: Weight Pointer (对应指令的 rs1 字段)
+            assign rs_dp2mxu[i].rs1_data       = uop_uop2dp[i].rs1_data;
             assign rs_dp2mxu[i].rs1_data_valid = uop_uop2dp[i].rs1_data_valid;
-            
+            // 5. Destination Index
+            assign rs_dp2mxu[i].vd_index       = uop_uop2dp[i].vd_index;
             assign rs_dp2mxu[i].uop_index      = uop_uop2dp[i].uop_index;
-
-            // 在 Dispatch 模块的 gen_output_sig 中
-            assign rs_dp2mxu[i].subop          = uop_uop2dp[i].mxu_ctrl.subop;
-            assign rs_dp2mxu[i].acc_en         = uop_uop2dp[i].mxu_ctrl.acc_en;
-            assign rs_dp2mxu[i].route_mode     = uop_uop2dp[i].mxu_ctrl.route_mode;
-            assign rs_dp2mxu[i].weight_idx     = uop_uop2dp[i].mxu_ctrl.weight_idx;
-            assign rs_dp2mxu[i].mode_wide      = uop_uop2dp[i].mxu_ctrl.mode_wide;
 
           // ROB
 `ifdef TB_SUPPORT

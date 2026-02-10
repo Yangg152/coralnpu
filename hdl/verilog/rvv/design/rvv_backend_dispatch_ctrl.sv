@@ -1,6 +1,3 @@
-// Description:
-// 1. the rvv_backend_dispatch_ctrl is responsible for push uop(s) to RS/ROB and pop uop(s) from UOP_Queue.
-
 `ifndef HDL_VERILOG_RVV_DESIGN_RVV_SVH
 `include "rvv_backend.svh"
 `endif
@@ -103,6 +100,10 @@ module rvv_backend_dispatch_ctrl
                                     ~raw_uop_uop[i].v0_wait  &
                                     ~arch_hazard.vr_limit    ;  
         end
+        
+        // --------------------------------------------------------
+        // [修改点] RS Ready 信号生成逻辑
+        // --------------------------------------------------------
         for (i=0; i<`NUM_DP_UOP; i++) begin : gen_rs_ready
           if (i==0)
             always_comb begin
@@ -114,7 +115,7 @@ module rvv_backend_dispatch_ctrl
                     PMT,
                     RDT: rs_ready[0] = rs_ready_pmtrdt2dp[0];
                     DIV: rs_ready[0] = rs_ready_div2dp[0];
-                    LSU: rs_ready[0] = rs_ready_lsu2dp[0]&mapinfo_ready_lsu2dp[0];
+                    LSU: rs_ready[0] = rs_ready_lsu2dp[0] & mapinfo_ready_lsu2dp[0];
                     // [新增] 处理 MXU 的 Ready 信号
                     MXU: rs_ready[0] = rs_ready_mxu2dp[0];
                     default: rs_ready[0] = 1'b0;
@@ -131,12 +132,16 @@ module rvv_backend_dispatch_ctrl
                     RDT: rs_ready[i] = rs_ready[i-1] & rs_ready_pmtrdt2dp[i];
                     DIV: rs_ready[i] = rs_ready[i-1] & rs_ready_div2dp[i];
                     LSU: rs_ready[i] = rs_ready[i-1] & rs_ready_lsu2dp[i] & mapinfo_ready_lsu2dp[i];
-                    // [新增] 级联处理 MXU Ready 信号 (考虑多发射情况)
+                    // [新增] 级联处理 MXU Ready 信号
                     MXU: rs_ready[i] = rs_ready[i-1] & rs_ready_mxu2dp[i];
                     default: rs_ready[i] = 1'b0;
                 endcase
             end
         end
+
+        // --------------------------------------------------------
+        // [修改点] 输出 Valid 信号生成逻辑
+        // --------------------------------------------------------
         for (i=0; i<`NUM_DP_UOP; i++) begin: gen_ctrl_output
             assign uop_ready_dp2uop[i]     = uop_valid[i]        &
                                              uop_ready_rob2dp[i] &
@@ -160,7 +165,7 @@ module rvv_backend_dispatch_ctrl
                                              (uop_ctrl[i].uop_exe_unit == LSU);
             assign mapinfo_valid_dp2lsu[i] = uop_valid_dp2rob[i] & 
                                              (uop_ctrl[i].uop_exe_unit == LSU);
-            
+
             // [新增] 生成 MXU Valid 信号
             assign rs_valid_dp2mxu[i]      = uop_ready_dp2uop[i] & 
                                              (uop_ctrl[i].uop_exe_unit == MXU);

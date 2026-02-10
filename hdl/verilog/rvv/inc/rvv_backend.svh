@@ -102,35 +102,27 @@ typedef enum logic [3:0] {
   //luoyang_end
 } EXE_UNIT_e;
 
+// luoyang_start
 // =========================================================================
-// [Move Up] Flex-MXU Definitions (Moved here to be used in UOP_QUEUE_t)
+// [Flex-MXU Definitions v3.0 - Stateless Edition]
+// Optimized for Deep Mode (16x16) and Spatial Mode (GEMM-4)
 // =========================================================================
 
-// MXU Sub-opcode to identify specific matrix operations
+// MXU Sub-opcode strictly aligned with ISA v3.0
 typedef enum logic [2:0] {
-  MXU_NOP   = 3'b000,
-  MXU_MMA   = 3'b001, // Matrix Multiply-Accumulate (C += A * B)
-  MXU_WLOAD = 3'b010 // Weight Load (Load data to internal SRAM)
+  MXU_NOP         = 3'b000,
+  MXU_SUBOP_DEEP  = 3'b001, // 16x16 Deep Mode (M=1, K=16, N=16)
+  MXU_SUBOP_WLOAD = 3'b010, // Weight Load (LSU Snooping Bypass)
+  MXU_SUBOP_GEMM4 = 3'b011  // 4x4x16 Spatial Mode (GEMM-4)
 } mxu_subop_e;
 
-// MXU Router Mode (Controls the Lightweight Operand Router)
-typedef enum logic [1:0] {
-  MXU_ROUTE_PASS  = 2'b00, // Pass-through: Standard 16x16 Systolic
-  MXU_ROUTE_BCAST = 2'b01, // Broadcast: 1x1 Conv or Matrix-Vector (Scalar/Vector broadcast)
-  MXU_ROUTE_SHUFF = 2'b10  // Shuffle: RGB Interleaved or Wide-Mode (4x64) mapping
-} mxu_route_e;
-
-// [New] Structure to hold MXU control signals within UOP_QUEUE_t
 typedef struct packed {
-  mxu_subop_e    subop;       // Operation type
-  mxu_route_e    route_mode;  // Mux selection
-  logic          acc_en;      // Accumulate enable
-  logic          mode_wide;   // Wide mode enable
-  logic [15:0]   weight_idx;  // Decoded immediate/index for weights
+  mxu_subop_e    subop;       // Controls Datapath MUX & Tiling Logic
+  logic          acc_en;      // Fused Accumulation Control:
+                              // 0: Overwrite (Vd = Vs2 * W)
+                              // 1: Accumulate (Vd = Vd + Vs2 * W)
 } MXU_CTRL_t;
-
-// =========================================================================
-
+// luoyang_end
 
 // when EXE_UNIT_e is not LSU, it is used to distinguish arithmetic instructions, based on inst_encoding[14:12]
   parameter  OPIVV=3'b000;      // vs2,      vs1, vd.
@@ -246,12 +238,9 @@ typedef struct packed {
   // =========================================================================
   // Flex-MXU Instruction Opcodes (Funct6 Definitions)
   // =========================================================================
-  // Maps to "OPMVV" (010) or "OPIVV" (000) depending on your implementation
-  // These 6-bit values differentiate the modes stateless-ly.
-  
-  parameter MXU_OP_MMA_DEEP = 6'b001_101; // 16x16 Mode (Standard)
-  parameter MXU_OP_MMA_WIDE = 6'b010_101; // 4x64 Mode (Wide/First-Layer)
-  parameter MXU_OP_WLOAD    = 6'b010_110; // Weight Load Instruction
+  parameter MXU_OP_MMA_DEEP  = 6'b001_101; // Funct6: 13
+  parameter MXU_OP_MMA_GEMM4 = 6'b010_101; // Funct6: 21
+  parameter MXU_OP_WLOAD     = 6'b010_110; // Funct6: 22 (Dispatched to LSU)
   // luoyang_end  
 
 // vwxunary0, the uop could be vcpop.m, vfirst.m and vmv. They can be distinguished by vs1 field(inst_encoding[19:15]).
@@ -418,7 +407,7 @@ typedef struct packed {
   logic                               pshrob_valid;       // wheather this uop is pushed into ROB.
 
   // luoyang_start
-  // [Added for Scheme 1] Pass decoded MXU control signals to Dispatch/RS
+  // [Added for Flex-MXU] Pass decoded MXU control signals to Dispatch/RS
   MXU_CTRL_t                          mxu_ctrl;
   // luoyang_end
 } UOP_QUEUE_t;    
@@ -569,27 +558,41 @@ typedef struct packed {
 
   logic                               vidx_valid; 
   logic   [`REGFILE_INDEX_WIDTH-1:0]  vidx_addr;
-  logic   [`VLEN-1:0]                 vidx_data;            // vs2        
+  logic   [`VLEN-1:0]                 vidx_data;            
   logic                               vregfile_read_valid; 
   logic   [`REGFILE_INDEX_WIDTH-1:0]  vregfile_read_addr;
-  logic   [`VLEN-1:0]                 vregfile_read_data;   // vs3       
+  logic   [`VLEN-1:0]                 vregfile_read_data;   
   logic                               v0_valid;
-  logic   [`VLENB-1:0]                v0_data;              // byte strobe signal for mask load/store. 
-                                                            // v0[i]=1 means vd/vs3[8*i +: 8] data is valid. 
-} UOP_RVV2LSU_t;    
+  logic   [`VLENB-1:0]                v0_data;              
+
+  // luoyang_start
+  // [Antigravity Fix] Flex-MXU Snooping Protocol
+  // LSU only needs to know this transaction bypasses VRF. 
+  // Address calculation happens in AGU (mapped to vidx_addr/rs1).
+  logic                               is_mxu_wload;         
+  // luoyang_end
+} UOP_RVV2LSU_t;     
+
 
 //
-// EX stage, 
+// EX stage -> ROB
 //
-// send PU's result to ROB
 typedef struct packed {
 `ifdef TB_SUPPORT
   logic   [`PC_WIDTH-1:0]             uop_pc;
 `endif
   logic   [`ROB_DEPTH_WIDTH-1:0]      rob_entry;
-  logic   [`VLEN-1:0]                 w_data;             // when w_type=XRF, w_data[`XLEN-1:0] will store the scalar result
+  logic   [`VLEN-1:0]                 w_data;             
   logic                               w_valid;
+  // luoyang_start
+  // [Review] Used for dedicated forwarding path if needed, 
+  // otherwise retire uses rob_entry mapping.
+  logic   [`REGFILE_INDEX_WIDTH-1:0]  rd_index; 
+  // luoyang_end
   logic   [`VLENB-1:0]                vsaturate;
+  // luoyang_start
+  logic   [`VLENB-1:0]                v0_mask; 
+  // luoyang_end
 } PU2ROB_t;  
 
 // lsu uop info to remap rob_entry for UOP_LSU2RVV_t
@@ -606,17 +609,23 @@ typedef struct packed {
 // LSU feedback to RVV
 typedef struct packed {   
 `ifdef TB_SUPPORT
-  // To trace wave
   logic   [`PC_WIDTH-1:0]             uop_pc;
   logic   [`UOP_INDEX_WIDTH-1:0]      uop_index;         
 `endif
-  // For load data
-  logic                               vregfile_write_valid;
+  // For standard load data
+  logic                               vregfile_write_valid; // MUST BE 0 for MXU_WLOAD
   logic	[`REGFILE_INDEX_WIDTH-1:0] 	  vregfile_write_addr;  
-  logic	[`VLEN-1:0] 			          	vregfile_write_data;  	// vd   
-  // Store done signal to help ROB retire the store uop
+  logic	[`VLEN-1:0] 			          	vregfile_write_data;  	   
   logic                               lsu_vstore_last;
-} UOP_LSU2RVV_t;  
+  
+  // luoyang_start
+  // MXU Snooping Ack
+  // Signals ROB to commit, but NO data is written to VRF from LSU.
+  // Data flowed: Mem -> Bus -> LSU -> MXU_SRAM (Snooped)
+  logic                               is_mxu_wload; 
+  // luoyang_end
+
+} UOP_LSU2RVV_t;   
 
 typedef struct packed {
   UOP_LSU2RVV_t                       uop_lsu2rvv;
@@ -708,46 +717,46 @@ typedef struct packed {
 }RT2VRF_t;
 
 // luoyang_start
-
-// MXU Reservation Station Data Structure
+// =========================================================================
+// MXU Reservation Station Data Structure (v3.0 Optimized)
+// Optimized for Stateless Execution (No CSRs, Instruction Driven)
+// =========================================================================
 typedef struct packed {
 `ifdef TB_SUPPORT
   logic   [`PC_WIDTH-1:0]             uop_pc;
 `endif
-  logic   [`ROB_DEPTH_WIDTH-1:0]      rob_entry;      // Used for Out-of-Order retirement tracking
+  logic   [`ROB_DEPTH_WIDTH-1:0]      rob_entry;      
   
-  // Standard RVV decoding info
   FUNCT6_u                            uop_funct6;
   logic   [`FUNCT3_WIDTH-1:0]         uop_funct3;
   
-  // MXU Specific Control Signals
-  mxu_subop_e                         subop;          // Operation type
-  mxu_route_e                         route_mode;     // Mux selection for the Input Router
-  logic                               acc_en;         // 1: Accumulate (+=), 0: Overwrite (=)
-  logic   [15:0]                      weight_idx;     // Internal Weight SRAM address (from immediate)
-  logic                               mode_wide;      // 0: 16x16 Mode, 1: 4x64 Wide Mode
+  // Control Signals (Decoded from Instruction)
+  MXU_CTRL_t                          ctrl;
 
-  // Source Operand 1: Input Activations / Pixels (From VRF)
-  // The Router will slice/shuffle this 128-bit data before feeding the array
-  logic   [`VLEN-1:0]                 vs1_data;           
-  logic                               vs1_data_valid; 
-
-  // Source Operand 2: Current Accumulator / Bias (From VRF)
-  // Used for C = C + ... operations
-  logic   [`VLEN-1:0]                 vs2_data;	        
+  // Source Operand 1: Activation (INT8)
+  // v3.0 Requirement: 
+  // - Deep Mode: 1x16 Vector
+  // - GEMM4 Mode: 4x4 Spatial Pixels (128-bit packed)
+  logic   [`VLEN-1:0]                 vs2_data;           
   logic                               vs2_data_valid; 
-  EEW_e                               vs2_eew;        // Element width (usually 32b for Acc)
+  // Note: Backend assumes EEW8 for activations.
 
-  // Source Operand 3 / Scalar: Optional (From XRF or Imm)
-  // Can be used for Broadcast values or configuration data
+  // Source Operand 2: Accumulator (INT32)
+  // Used when ctrl.acc_en = 1.
+  logic   [`VLEN-1:0]                 vd_old_data;	        
+  logic                               vd_old_data_valid; 
+  // Note: Backend assumes EEW32 for accumulator.
+
+  // Source Operand 3: Weight Index / Config
+  // Extracted from rs1 or immediate. Used to address MXU SRAM.
   logic   [`XLEN-1:0] 	              rs1_data;          
-  logic          	                  rs1_data_valid;   
+  logic          	                    rs1_data_valid;   
 
-  // Uop Index tracking
+  // Destination Info
+  logic   [`REGFILE_INDEX_WIDTH-1:0]  vd_index; // Renamed from rd_index
   logic   [`UOP_INDEX_WIDTH-1:0]      uop_index;
 
 } MXU_RS_t;
-
 // luoyang_end
 
 
