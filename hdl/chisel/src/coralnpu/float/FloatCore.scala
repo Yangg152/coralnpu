@@ -89,11 +89,11 @@ object GenerateCoreShimSource {
         moduleInterface += "  output logic out_valid_o,\n"
         moduleInterface += "  input logic out_ready_i,\n"
         moduleInterface += "  output logic[WIDTH-1:0] result_o,\n".replaceAll("WIDTH", FpNewConfig.WIDTH.toString)
-        moduleInterface += "  output logic[4:0] status_o,\n"
+        for (i <- 0 until 5) {
+            moduleInterface += "  output logic status_o_GENI,\n".replaceAll("GENI", i.toString)
+        }
         moduleInterface += "  output logic busy_o,\n"
-
-        // Drop final ",\n"
-        moduleInterface = moduleInterface.dropRight(2)
+        moduleInterface += "  output logic early_valid_o\n"
         moduleInterface += ");\n\n"
 
         var coreInstantiation = "  logic [NUM_OPERANDS-1:0][WIDTH-1:0] operands_i;\n"
@@ -102,6 +102,11 @@ object GenerateCoreShimSource {
 
         for (i <- 0 until FpNewConfig.NUM_OPERANDS) {
             coreInstantiation += "  assign operands_i[GENI] = operands_i_GENI;\n".replaceAll("GENI", i.toString)
+        }
+
+        coreInstantiation += "  fpnew_pkg::status_t status_o_pkg;\n"
+        for (i <- 0 until 5) {
+            coreInstantiation += "  assign status_o_GENI = status_o_pkg[GENI];\n".replaceAll("GENI", i.toString)
         }
 
         coreInstantiation += """  localparam fpnew_pkg::fpu_implementation_t impl = '{
@@ -117,7 +122,7 @@ object GenerateCoreShimSource {
         coreInstantiation += """  fpnew_top#(
         |      .Features(fpnew_pkg::RV32F),
         |      .Implementation(impl),
-        |      .PulpDivsqrt(PULP_DIVSQRT)
+        |      .DivSqrtSel(DIVSQRT_SEL)
         |    ) core(
         |    .clk_i(clk_i),
         |    .rst_ni(rst_ni),
@@ -134,15 +139,15 @@ object GenerateCoreShimSource {
         |    .in_valid_i(in_valid_i),
         |    .flush_i(flush_i),
         |    .out_ready_i(out_ready_i),
-
         |    .in_ready_o(in_ready_o),
         |    .result_o(result_o),
-        |    .status_o(status_o),
+        |    .status_o(status_o_pkg),
         |    .tag_o(),
         |    .out_valid_o(out_valid_o),
-        |    .busy_o(busy_o)
+        |    .busy_o(busy_o),
+        |    .early_valid_o(early_valid_o)
         |  );
-        |""".replaceAll("PULP_DIVSQRT", p.floatPulpDivsqrt.toString).stripMargin
+        |""".replaceAll("DIVSQRT_SEL", if (p.floatPulpDivsqrt != 0) "fpnew_pkg::PULP" else "fpnew_pkg::TH32").stripMargin
 
         moduleInterface + coreInstantiation + "endmodule\n"
     }
@@ -164,8 +169,9 @@ class FloatCoreWrapper(p: Parameters) extends BlackBox with HasBlackBoxInline
         val out_valid_o = Output(Bool())
         val out_ready_i = Input(Bool())
         val result_o = Output(UInt(FpNewConfig.WIDTH.W))
-        val status_o = Output(UInt(5.W)) // fflags
+        val status_o = Output(Vec(5, Bool())) // fflags
         val busy_o = Output(Bool())
+        val early_valid_o = Output(Bool())
     })
     addResource("external/common_cells/include/common_cells/registers.svh")
     addResource("external/common_cells/src/cf_math_pkg.sv")
@@ -336,7 +342,7 @@ class FloatCore(p: Parameters) extends Module {
     io.write_ports(1).data := Fp32.fromWord(io.lsu_rd.bits.data)
 
     io.csr.in.fflags.valid := (floatCoreWrapper.io.out_valid_o && inst.fire && !fmv)
-    io.csr.in.fflags.bits := floatCoreWrapper.io.status_o
+    io.csr.in.fflags.bits := floatCoreWrapper.io.status_o.asUInt
 
     val scalar_rd_pre_pipe = Wire(Decoupled(new RegfileWriteDataIO))
     scalar_rd_pre_pipe.valid := (((floatCoreWrapper.io.in_valid_i && floatCoreWrapper.io.in_ready_o) || fpuActive) && floatCoreWrapper.io.out_valid_o && floatCoreWrapper.io.out_ready_i && inst.bits.scalar_rd) || (fmv_x_w)

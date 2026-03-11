@@ -42,5 +42,13 @@ package memory_map_pkg;
     return (addr >= CSR_START_ADDR) && (addr < (CSR_START_ADDR + CSR_LENGTH));
   endfunction
 
+  // External Memory (SRAM)
+  localparam logic [31:0] EXTMEM_START_ADDR = 32'h2000_0000;
+  localparam logic [31:0] EXTMEM_LENGTH     = 32'h0040_0000; // 4MB
+
+  function automatic bit is_in_ext_mem(input logic [31:0] addr);
+    return (addr >= EXTMEM_START_ADDR) && (addr < (EXTMEM_START_ADDR + EXTMEM_LENGTH));
+  endfunction
+
 
 endpackage : memory_map_pkg

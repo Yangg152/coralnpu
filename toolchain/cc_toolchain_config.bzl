@@ -78,7 +78,7 @@ def _impl(ctx):
         ),
         tool_path(
             name = "objdump",
-            path = "/bin/false",
+            path = "wrappers/objdump",
         ),
         tool_path(
             name = "objcopy",
@@ -175,9 +175,12 @@ def _impl(ctx):
             flag_group(
                 flags = [
                     "--specs=nano.specs",
+                    "-Wl,--start-group",
+                    "-lstdc++",
                     "-lm",
                     "-lc",
                     "-lgcc",
+                    "-Wl,--end-group",
                     "-nostartfiles",
                 ],
             ),
@@ -191,9 +194,12 @@ def _impl(ctx):
                 flags = [
                     "--specs=htif_nano.specs",
                     "-lsemihost",
+                    "-Wl,--start-group",
+                    "-lstdc++",
                     "-lm",
                     "-lc",
                     "-lgcc",
+                    "-Wl,--end-group",
                 ],
             ),
         ],
@@ -354,6 +360,21 @@ def _impl(ctx):
         ],
     )
 
+    generate_linker_map_feature = feature(
+        name = "generate_linker_map",
+        enabled = True,
+        flag_sets = [
+            flag_set(
+                actions = all_link_actions,
+                flag_groups = [
+                    flag_group(
+                        flags = ["-Wl,-Map,%{output_execpath}.map"],
+                    ),
+                ],
+            ),
+        ],
+    )
+
     return cc_common.create_cc_toolchain_config_info(
         ctx = ctx,
         toolchain_identifier = "coralnpu_v2_toolchain",
@@ -375,6 +396,7 @@ def _impl(ctx):
             fastbuild_feature,
             opt_feature,
             strip_debug_symbols_feature,
+            generate_linker_map_feature,
         ],
         tool_paths = tool_paths,
     )

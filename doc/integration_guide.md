@@ -29,7 +29,6 @@ The interfaces to CoralNPU are defined as follows:
 |       irqn       | Active-low interrupt to the CoralNPU core. Can be triggered by peripherals or other host processor. |
 |       wfi        | Active-high signal from the CoralNPU core, indicating that the core is waiting for an interrupt. While this is active, CoralNPU is clock-gated. |
 |      debug       | Debug interface to monitor CoralNPU instructions execution. This interface is typically only used for simulation. |
-|      s_log       | Debug interface to handle SLOG instruction. This interface is typically only used for simulation. |
 |      halted      | Output interface informing if the Core is running or not. Can be ignored. |
 |      fault       | Output interface to determine if the Core hit a fault. These signals should be connected to a system control CPU interrupt-line or status register for notification when CoralNPU faults or is halted. |
 

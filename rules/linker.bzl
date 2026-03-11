@@ -29,10 +29,14 @@ def _generate_linker_script_impl(ctx):
     if ctx.attr.itcm_size_kbytes != itcm_size_kbytes_default or ctx.attr.dtcm_size_kbytes != dtcm_size_kbytes_default:
         dtcm_origin = dtcm_origin_highmem
 
+    stack_size_bytes_default = 128
+    stack_size = ctx.attr.stack_size_bytes if ctx.attr.stack_size_bytes else stack_size_bytes_default
+
     substitutions = {
         "@@ITCM_LENGTH@@": str(ctx.attr.itcm_size_kbytes),
         "@@DTCM_LENGTH@@": str(ctx.attr.dtcm_size_kbytes),
         "@@DTCM_ORIGIN@@": dtcm_origin,
+        "@@STACK_SIZE@@": str(stack_size),
     }
 
     ctx.actions.expand_template(
@@ -48,5 +52,6 @@ generate_linker_script = rule(
         "out": attr.output(mandatory = True),
         "itcm_size_kbytes": attr.int(mandatory = True),
         "dtcm_size_kbytes": attr.int(mandatory = True),
+        "stack_size_bytes": attr.int(default = 128),
     },
 )

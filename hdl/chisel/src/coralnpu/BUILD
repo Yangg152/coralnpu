@@ -504,29 +504,6 @@ chisel_cc_library(
     vopts = CORE_MINI_AXI_VOPTS,
 )
 
-chisel_cc_library(
-    name = "core_mini_axi_debug_cc_library",
-    chisel_lib = ":coralnpu",
-    emit_class = "coralnpu.EmitCore",
-    extra_outs = [
-        "VCoreMiniDebugAxi_parameters.h",
-        "CoreMiniDebugAxi.zip",
-    ],
-    gen_flags = [
-        "--enableFetchL0=False",
-        "--fetchDataBits=128",
-        "--lsuDataBits=128",
-        "--enableDebug=True",
-        "--enableFloat=True",
-        "--moduleName=CoreMiniDebug",
-        "--useAxi",
-    ],
-    module_name = "CoreMiniDebugAxi",
-    verilog_file_path = "CoreMiniDebugAxi.sv",
-    vopts = [
-        "-DUSE_GENERIC",
-    ],
-)
 
 CORE_MINI_AXI_BLACKBOX_DESIGNS = [
     "CKLNQD10BWP6T20P96CPDLVT",
@@ -624,18 +601,6 @@ template_rule(
             ] + RVV_CORE_MINI_AXI_COMMON_GEN_FLAGS,
             "module_name": "RvvCoreMiniVerificationAxi",
         },
-        "rvv_core_mini_debug_axi_cc_library": {
-            "verilog_file_path": "RvvCoreMiniDebugAxi.sv",
-            "extra_outs": [
-                "VRvvCoreMiniDebugAxi_parameters.h",
-                "RvvCoreMiniDebugAxi.zip",
-            ],
-            "gen_flags": [
-                "--moduleName=RvvCoreMiniDebug",
-                "--enableDebug=True",
-            ] + RVV_CORE_MINI_AXI_COMMON_GEN_FLAGS,
-            "module_name": "RvvCoreMiniDebugAxi",
-        },
         "rvv_core_mini_highmem_axi_cc_library": {
             "extra_outs": [
                 "VRvvCoreMiniHighmemAxi_parameters.h",
@@ -667,6 +632,7 @@ template_rule(
     vopts = [
         "-DUSE_GENERIC",
         # RVV
+        "-DTB_SUPPORT",
         "-Wno-WIDTH",
         "-Wno-CASEINCOMPLETE",
         "-Wno-LATCH",

@@ -65,6 +65,113 @@ async def core_mini_axi_debug_gdbserver(dut):
         ]
         assert await gdbserver.run(f, cmds)
 
+    # Set and continue to a breakpoint, and then single step.
+    # This step should cause the PC to change.
+    with open(r.Rlocation("coralnpu_hw/tests/cocotb/math.elf"), "rb") as f:
+        cmds = [
+            f"break math",
+            "continue",
+            "set $bpc = $pc",
+            "stepi",
+            "if $bpc == $pc",
+            "quit 1",
+            "end",
+        ]
+        assert await gdbserver.run(f, cmds)
+
+    # Set and continue to a breakpoint, and single step.
+    # The breakpointed function is an infinite loop, so PC should not change.
+    with open(r.Rlocation("coralnpu_hw/tests/cocotb/loop.elf"), "rb") as f:
+        cmds = [
+            f"break loop",
+            "continue",
+            "set $bpc = $pc",
+            "stepi",
+            "if $bpc != $pc",
+            "quit 1",
+            "end",
+        ]
+        assert await gdbserver.run(f, cmds)
+
+    # Test memory writes/reads at different sizes via GDB.
+    # Target DTCM at address 0x10000.
+    dtcm_addr = 0x10000
+    with open(r.Rlocation("coralnpu_hw/tests/cocotb/noop.elf"), "rb") as f:
+        # Test byte write/read
+        cmds = [
+            f"set {{unsigned char}}{hex(dtcm_addr)} = 0xAA",
+            f"if {{unsigned char}}{hex(dtcm_addr)} != 0xAA",
+            "quit 1",
+            "end",
+        ]
+        assert await gdbserver.run(f, cmds)
+
+        # Test short write/read
+        cmds = [
+            f"set {{unsigned short}}{hex(dtcm_addr)} = 0xBBCC",
+            f"if {{unsigned short}}{hex(dtcm_addr)} != 0xBBCC",
+            "quit 1",
+            "end",
+        ]
+        assert await gdbserver.run(f, cmds)
+
+        # Test word write/read
+        cmds = [
+            f"set {{unsigned int}}{hex(dtcm_addr)} = 0xDDEEFF00",
+            f"if {{unsigned int}}{hex(dtcm_addr)} != 0xDDEEFF00",
+            "quit 1",
+            "end",
+        ]
+        assert await gdbserver.run(f, cmds)
+
+        # Test offset/misaligned accesses
+        # Byte at offset 1 (0x10001)
+        cmds = [
+            f"set {{unsigned char}}{hex(dtcm_addr + 1)} = 0x55",
+            f"if {{unsigned char}}{hex(dtcm_addr + 1)} != 0x55",
+            "quit 1",
+            "end",
+        ]
+        assert await gdbserver.run(f, cmds)
+
+        # Short at offset 2 (0x10002) - Upper half of word
+        cmds = [
+            f"set {{unsigned short}}{hex(dtcm_addr + 2)} = 0x8899",
+            f"if {{unsigned short}}{hex(dtcm_addr + 2)} != 0x8899",
+            "quit 1",
+            "end",
+        ]
+        assert await gdbserver.run(f, cmds)
+
+        # Short at offset 1 (0x10001) - Misaligned
+        # Note: This relies on the memory subsystem supporting this strobe pattern (0110).
+        cmds = [
+            f"set {{unsigned short}}{hex(dtcm_addr + 1)} = 0x3344",
+            f"if {{unsigned short}}{hex(dtcm_addr + 1)} != 0x3344",
+            "quit 1",
+            "end",
+        ]
+        assert await gdbserver.run(f, cmds)
+
+        # Test block access (7 bytes)
+        # Should result in 4-byte, 2-byte, 1-byte accesses.
+        # Write 0x01020304050607
+        cmds = [
+            f"set {{unsigned long long}}{hex(dtcm_addr)} = 0x07060504030201",
+            # Verify bytes individually
+            f"if {{unsigned char}}{hex(dtcm_addr)} != 0x01",
+            "quit 1",
+            "end",
+            f"if {{unsigned char}}{hex(dtcm_addr + 4)} != 0x05",
+            "quit 1",
+            "end",
+            f"if {{unsigned char}}{hex(dtcm_addr + 6)} != 0x07",
+            "quit 1",
+            "end",
+        ]
+        assert await gdbserver.run(f, cmds)
+
+
 @cocotb.test()
 async def core_mini_axi_debug_dmactive(dut):
     core_mini_axi = CoreMiniAxiInterface(dut)
@@ -383,8 +490,8 @@ async def core_mini_axi_debug_breakpoint(dut):
         # Write 0 to tdata1, read back
         await core_mini_axi.dm_write_reg(0x7A1, 0)
         tdata1 = await core_mini_axi.dm_read_reg(0x7A1)
-        # Check that the trigger is disabled
-        assert (tdata1 & 0xF0000000) == 0xF0000000
+        # Check that the trigger is type 6
+        assert (tdata1 & 0x60000000) == 0x60000000
 
         # Write tdata2
         await core_mini_axi.dm_write_reg(0x7A2, main)
@@ -392,10 +499,10 @@ async def core_mini_axi_debug_breakpoint(dut):
         # Even if that just disable things.
         # Write mcontext6-type data to tdata1
         # tdata1 = tdata1 |...
-        desired_tdata1 = 0x62431044
+        desired_tdata1 = 0x68001044
         await core_mini_axi.dm_write_reg(0x7A1, desired_tdata1)
         tdata1 = await core_mini_axi.dm_read_reg(0x7A1)
-        assert tdata1 == 0x62431044
+        assert tdata1 == desired_tdata1
 
         # Request resume
         await core_mini_axi.dm_request_resume()

@@ -24,9 +24,6 @@
 
 // A core debug model.
 struct Debug_if : Sysc_module {
-  sc_in<bool>       io_slog_valid;
-  sc_in<sc_bv<5> >  io_slog_addr;
-  sc_in<sc_bv<32> > io_slog_data;
 
   Debug_if(sc_module_name n, Memory_if* mm) : Sysc_module(n), mm_(mm) {
     gettimeofday(&start_, NULL);
@@ -54,9 +51,6 @@ struct Debug_if : Sysc_module {
       cycle_ = 0;
     } else if (clock->posedge()) {
       cycle_++;
-      if (io_slog_valid) {
-        Slog(io_slog_addr.read().get_word(0), io_slog_data.read().get_word(0));
-      }
     }
   }
 
@@ -86,81 +80,6 @@ struct Debug_if : Sysc_module {
 
   bool newline_ = false;
   int cycle_ = 0;
-
-  void Slog(const uint8_t cmd, const uint32_t data) {
-    constexpr int FLOG = 0;
-    constexpr int SLOG = 1;
-    constexpr int CLOG = 2;
-    constexpr int KLOG = 3;
-
-    if (cmd == FLOG) {
-      char buf[BUFFERLIMIT];
-      char sbuf[ARGMAX * BUFFERLIMIT];
-
-      mm_->Read(data, BUFFERLIMIT, reinterpret_cast<uint8_t*>(buf));
-      buf[sizeof(buf) - 1] = '\0';
-
-      snprintf(sbuf, sizeof(sbuf), buf, arg_[0], arg_[1], arg_[2], arg_[3],
-               arg_[4], arg_[5], arg_[6], arg_[7], arg_[8], arg_[9], arg_[10],
-               arg_[11], arg_[12], arg_[13], arg_[14], arg_[15]);  // ARGMAX
-
-      int len = strlen(sbuf);
-#ifndef TIME_DISABLE
-      printf("%s", KGRN);
-#endif  // TIME_DISABLE
-      for (int i = 0; i < len; ++i) {
-        if (!newline_) {
-          newline_ = true;
-#ifndef TIME_DISABLE
-          printf("%s[%7d] %s", KCYN, cycle_, KGRN);
-#endif  // TIME_DISABLE
-        }
-        const char ch = sbuf[i];
-        putc(ch, stdout);
-        if (ch == '\n') {
-          newline_ = false;
-          fflush(stdout);
-        }
-      }
-#ifndef TIME_DISABLE
-      printf("%s", KRST);
-#endif  // TIME_DISABLE
-
-      memset(pos_, 0, sizeof(pos_));
-      argpos_ = 0;
-      return;
-    }
-
-    assert(argpos_ < ARGMAX);
-
-    if (cmd == SLOG) {
-      arg_[argpos_] = data;
-      argpos_++;
-    } else if (cmd == CLOG) {
-      arg_[argpos_] = (uint64_t) str_[argpos_];
-      const uint8_t *ptr = (const uint8_t*) &data;
-      uint8_t *buf = str_[argpos_];
-      for (int i = 0; i < 4; ++i) {
-        const int p = pos_[argpos_]++;
-        const char c = ptr[i];
-        assert(p + 1 < BUFFERLIMIT);
-        buf[p] = c;
-        buf[p + 1] = '\0';
-        if (!c) {
-          argpos_++;
-          break;
-        }
-      }
-    } else if (cmd == KLOG) {
-      arg_[argpos_] = (uint64_t) str_[argpos_];
-      uint8_t* buf = str_[argpos_];
-      mm_->Read(data, BUFFERLIMIT, buf);
-      argpos_++;
-    } else {
-      printf("\n**error: RV32L SLOG unknown cmd=%d\n", cmd);
-      exit(-1);
-    }
-  }
 };
 
 #endif  // TESTS_VERILATOR_SIM_CORALNPU_DEBUG_IF_H_

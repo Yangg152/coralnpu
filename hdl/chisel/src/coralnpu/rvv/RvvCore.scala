@@ -149,7 +149,10 @@ object GenerateCoreShimSource {
             |    output rd_rob2rt_o_GENI_vector_csr_lmul,
             |    output rd_rob2rt_o_GENI_vector_csr_lmul_orig,
             |    output rd_rob2rt_o_GENI_vector_csr_vill,
-            |    output [15:0] rd_rob2rt_o_GENI_vxsaturate,""".stripMargin.replaceAll("GENI", i.toString)
+            |    output [15:0] rd_rob2rt_o_GENI_vxsaturate,
+            |    output [31:0] rd_rob2rt_o_GENI_uop_pc,
+            |    output rd_rob2rt_o_GENI_last_uop_valid,
+            """.stripMargin.replaceAll("GENI", i.toString)
     }
 
     // Add trap interface outputs
@@ -158,6 +161,11 @@ object GenerateCoreShimSource {
         |    output [31:0] trap_bits_pc,
         |    output [1:0] trap_bits_opcode,
         |    output [24:0] trap_bits_bits,""".stripMargin
+
+    // Add vxsat backend update outputs
+    moduleInterface += """
+        |    output wr_vxsat_valid_o,
+        |    output wr_vxsat_o,""".stripMargin
 
     // Remove last comma/linebreak
     moduleInterface = moduleInterface.dropRight(1)
@@ -320,7 +328,9 @@ object GenerateCoreShimSource {
         |      .queue_capacity(queue_capacity),
         |      .rd_rob2rt_o(rd_rob2rt_o),
         |      .trap_valid_o(trap_valid),
-        |      .trap_data_o(trap_data)
+        |      .trap_data_o(trap_data),
+        |      .wr_vxsat_valid_o(wr_vxsat_valid_o),
+        |      .wr_vxsat_o(wr_vxsat_o)
         |""".stripMargin.replaceAll("GENN", instructionLanes.toString)
     coreInstantiation += "  );\n"
 
@@ -341,6 +351,8 @@ object GenerateCoreShimSource {
       |  assign rd_rob2rt_o_GENI_vector_csr_lmul_orig = rd_rob2rt_o[GENI].vector_csr.lmul_orig;
       |  assign rd_rob2rt_o_GENI_vector_csr_vill = rd_rob2rt_o[GENI].vector_csr.vill;
       |  assign rd_rob2rt_o_GENI_vxsaturate = rd_rob2rt_o[GENI].vxsaturate;
+      |  assign rd_rob2rt_o_GENI_uop_pc = rd_rob2rt_o[GENI].uop_pc;
+      |  assign rd_rob2rt_o_GENI_last_uop_valid = rd_rob2rt_o[GENI].last_uop_valid;
       |""".stripMargin.replaceAll("GENI", i.toString)
     }
     coreInstantiation += """  assign trap_bits_pc = trap_data.pc;
@@ -401,6 +413,10 @@ class RvvCoreWrapper(p: Parameters) extends BlackBox with HasBlackBoxInline
     val vcsr_xrm = Output(UInt(2.W))
     val vcsr_vxsat = Output(Bool())
     val vcsr_ready = Input(Bool())
+
+    // VXSAT update from backend
+    val wr_vxsat_valid_o = Output(Bool())
+    val wr_vxsat_o = Output(Bool())
 
     // TODO(derekjchow): Parameterize
     val rvv2lsu = Vec(2, Decoupled(new Rvv2Lsu(p)))
@@ -550,6 +566,7 @@ class RvvCoreShim(p: Parameters) extends Module {
   vxrm := vxrm_wdata
 
   val vxsat_wdata = MuxCase(vxsat, Seq(
+      rvvCoreWrapper.io.wr_vxsat_valid_o -> (vxsat | rvvCoreWrapper.io.wr_vxsat_o),
       rvvCoreWrapper.io.vcsr_valid -> rvvCoreWrapper.io.vcsr_vxsat,
       io.csr.vxsat_write.valid -> io.csr.vxsat_write.bits,
   ))

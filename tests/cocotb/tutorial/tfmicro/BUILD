@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("@coralnpu_hw//third_party/python:requirements.bzl", "requirement")
 load("//rules:coco_tb.bzl", "cocotb_test_suite", "verilator_cocotb_model")
 load("//rules:coralnpu_v2.bzl", "coralnpu_v2_binary")
 load("//rules:utils.bzl", "generate_cc_arrays")
-
 load(
     "//tests/cocotb:build_defs.bzl",
     "VCS_BUILD_ARGS",
@@ -32,11 +32,12 @@ coralnpu_v2_binary(
     name = "run_mobilenet_v1_025_partial_binary",
     srcs = [
         "mobilenet_v1_025_partial_layers_cc",
-        "run_mobilenet.cc",
+        "run_partial_mobilenet.cc",
     ],
     hdrs = ["mobilenet_v1_025_partial_layers.h"],
-    itcm_size_kbytes = 1024,  # Highmem
     dtcm_size_kbytes = 1024,  # Highmem
+    itcm_size_kbytes = 1024,  # Highmem
+    visibility = ["//visibility:public"],
     deps = [
         "//sw/opt/litert-micro:mul",
         "//sw/opt/litert-micro:sub",
@@ -49,7 +50,13 @@ coralnpu_v2_binary(
         "@tflite_micro//tensorflow/lite/micro:op_resolvers",
         "@tflite_micro//tensorflow/lite/micro:system_setup",
     ],
-    visibility = ["//visibility:public"]
+)
+
+cc_library(
+    name = "mobilenet_v1_025_224_int8_dummy_lib",
+    srcs = ["mobilenet_v1_025_224_int8_dummy_cc"],
+    hdrs = ["mobilenet_v1_025_224_int8_dummy_h"],
+    visibility = ["//visibility:public"],
 )
 
 generate_cc_arrays(
@@ -62,6 +69,18 @@ generate_cc_arrays(
     name = "mobilenet_v1_025_partial_layers_h",
     src = "models/mobilenet_v1_025_partial_layers.tflite",
     out = "mobilenet_v1_025_partial_layers.h",
+)
+
+generate_cc_arrays(
+    name = "mobilenet_v1_025_224_int8_dummy_cc",
+    src = "models/mobilenet_v1_0.25_224_int8_dummy.tflite",
+    out = "mobilenet_v1_025_224_int8_dummy.cc",
+)
+
+generate_cc_arrays(
+    name = "mobilenet_v1_025_224_int8_dummy_h",
+    src = "models/mobilenet_v1_0.25_224_int8_dummy.tflite",
+    out = "mobilenet_v1_025_224_int8_dummy.h",
 )
 
 # BEGIN_TESTCASES_FOR_running_tflite
@@ -80,7 +99,7 @@ cocotb_test_suite(
     testcases_vname = "RUN_MOBILENET_TEST",
     tests_kwargs = {
         "waves": False,
-        "tags" : ["manual"],
+        "tags": ["manual"],
         "hdl_toplevel": "RvvCoreMiniHighmemAxi",
         "seed": "42",
         "size": "enormous",
@@ -109,11 +128,22 @@ cocotb_test_suite(
 coralnpu_v2_binary(
     name = "depthwise_conv_test",
     srcs = ["depthwise_conv_test.cc"],
-    itcm_size_kbytes = 1024,  # Highmem
     dtcm_size_kbytes = 1024,  # Highmem
+    itcm_size_kbytes = 1024,  # Highmem
     deps = [
         "//sw/opt/litert-micro:depthwise_conv",
-        "@tflite_micro//tensorflow/lite/kernels/internal:reference_base"
+        "@tflite_micro//tensorflow/lite/kernels/internal:reference_base",
+    ],
+)
+
+coralnpu_v2_binary(
+    name = "conv2d_test",
+    srcs = ["conv2d_test.cc"],
+    dtcm_size_kbytes = 1024,  # Highmem
+    itcm_size_kbytes = 1024,  # Highmem
+    deps = [
+        "//sw/opt/litert-micro:conv",
+        "@tflite_micro//tensorflow/lite/kernels/internal:reference_base",
     ],
 )
 

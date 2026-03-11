@@ -120,17 +120,10 @@ class Parameters(var m: Seq[MemoryRegion] = Seq(), val hartId: Int = 0) {
   def lsuDataBytes: Int = { lsuDataBits / 8 }
   val lsuDelayPipelineLen = 1
   def dbusSize: Int = { log2Ceil(lsuDataBits / 8) + 1 }
-  var enableDebug = false
-  def useDebugModule: Boolean = { enableDebug }
 
   // TCM Size Configuration
   var itcmSizeKBytes = Parameters.itcmSizeKBytesDefault
   var dtcmSizeKBytes = Parameters.dtcmSizeKBytesDefault
-
-  // [External] Core AXI interface.
-  val axiSysIdBits = 7
-  val axiSysAddrBits = 32
-  def axiSysDataBits: Int = { lsuDataBits }
 
   // [Internal] L1ICache interface.
   val l1islots = 256
@@ -143,7 +136,7 @@ class Parameters(var m: Seq[MemoryRegion] = Seq(), val hartId: Int = 0) {
   val l1dslots = 256  // (x2 banks)
   val axi1IdBits = 4  // (x2 banks, 3 bits unused)
   val axi1AddrBits = 32
-  def axi1DataBits: Int = { lsuDataBits } /* axiSysDataBits */ /* vectorBits */
+  def axi1DataBits: Int = { lsuDataBits }
 
   // [Internal] TCM[Vector,Scalar] interface.
   var axi2IdBits = 6
@@ -194,7 +187,6 @@ object EmitParametersHeader {
     builder = builder.append(s"#define KP_dbusSize ${p.dbusSize}\n")
     builder = builder.append(s"#define KP_useRetirementBuffer ${p.useRetirementBuffer}\n")
     builder = builder.append(s"#define KP_retirementBufferIdxWidth ${p.retirementBufferIdxWidth}\n")
-    builder = builder.append(s"#define KP_useDebugModule ${p.useDebugModule}\n")
     builder = builder.append("#endif\n")
     builder.result()
   }

@@ -165,7 +165,8 @@ class Spi2TLUL(p: Parameters) extends Module {
     val bulk_write_ptr = RegInit(0.U(log2Ceil(kBufferDepth * kBufferWidth / 8).W)) // Byte pointer for writes
 
     val bytes_written = bulk_read_write_ptr << log2Ceil(kBufferWidth / 8)
-    val bytes_read = spi_bulk_read_ptr
+    val spi_bulk_read_ptr_sync = RegNext(RegNext(spi_bulk_read_ptr, 0.U), 0.U)
+    val bytes_read = spi_bulk_read_ptr_sync
     val bulk_read_bytes_available = Wire(UInt(17.W))
     bulk_read_bytes_available := bytes_written - bytes_read
 
@@ -288,9 +289,12 @@ class Spi2TLUL(p: Parameters) extends Module {
     val write_byte_index = bulk_write_ptr(byte_index_bits - 1, 0)
 
     // Pipelined read for single-byte access
+    // Address is captured on clock N.
+    // Memory data is available on clock N+1.
     val single_read_addr_reg = RegNext(spi_bulk_read_ptr >> byte_index_bits, 0.U)
     write_data_buffer.readPorts(0).enable := true.B
     write_data_buffer.readPorts(0).address := single_read_addr_reg
+    // Data register captured on clock N+2.
     val selected_word_reg = RegNext(write_data_buffer.readPorts(0).data, 0.U)
 
     val write_shift = write_byte_index << 3
@@ -309,7 +313,8 @@ class Spi2TLUL(p: Parameters) extends Module {
 
     // sSEND_READ_DATA
     val selected_word = selected_word_reg
-    val byte_index = RegNext(spi_bulk_read_ptr(byte_index_bits - 1, 0), 0.U)
+    // Capture byte index on clock N+2 to match selected_word_reg latency.
+    val byte_index = RegNext(RegNext(spi_bulk_read_ptr(byte_index_bits - 1, 0), 0.U), 0.U)
 
     val status_map = Seq(
         TlReadState.sIdle.asUInt -> 0x00.U,
@@ -422,10 +427,9 @@ class Spi2TLUL(p: Parameters) extends Module {
     val read_fsm_active = tl_read_state_reg =/= TlReadState.sIdle
     val write_fsm_active = tl_write_state_reg =/= TlWriteState.sIdle
 
-    tl_a_q.io.enq.valid := MuxCase(false.B, Seq(
-      read_fsm_active  -> (tl_read_state_reg === TlReadState.sSendBeat),
-      write_fsm_active -> (tl_write_state_reg === TlWriteState.sSendBeat)
-    ))
+    val sram_addr_inc = tl_a_q.io.enq.fire && write_fsm_active
+    val sram_addr_next = Mux(write_cmd_fire, 0.U,
+                         Mux(sram_addr_inc, sram_addr_reg + 1.U, sram_addr_reg))
 
     tl_d_q.io.deq.ready := MuxCase(false.B, Seq(
       read_fsm_active  -> (tl_read_state_reg === TlReadState.sWaitBeatAck && tl_to_spi_bulk_q.io.enq.ready),
@@ -445,9 +449,14 @@ class Spi2TLUL(p: Parameters) extends Module {
                            tl_write_addr_fsm_reg + (sram_addr_reg << log2Ceil(tlul_p.w)),
                            tl_addr_fsm_reg + (tl_beat_count_reg << log2Ceil(tlul_p.w)))
     write_data_buffer.readPorts(2).enable := true.B
-    write_data_buffer.readPorts(2).address := sram_addr_reg
+    write_data_buffer.readPorts(2).address := sram_addr_next
     val tl_write_data = write_data_buffer.readPorts(2).data
-    a_bits.data     := Mux(write_fsm_active, RegNext(tl_write_data, 0.U), 0.U)
+    a_bits.data     := Mux(write_fsm_active, tl_write_data, 0.U)
+
+    tl_a_q.io.enq.valid := MuxCase(false.B, Seq(
+      read_fsm_active  -> (tl_read_state_reg === TlReadState.sSendBeat),
+      write_fsm_active -> (tl_write_state_reg === TlWriteState.sSendBeat)
+    ))
 
     tl_a_q.io.enq.bits := a_bits
 
@@ -505,8 +514,6 @@ class Spi2TLUL(p: Parameters) extends Module {
     val is_last_beat_ack = (tl_write_state_reg === TlWriteState.sWaitBeatAck) && tl_d_q.io.deq.fire && (tl_write_beat_count_reg === tl_write_len_fsm_reg)
     tl_write_beat_count_reg := Mux(write_cmd_fire, 0.U, tl_write_beat_count_next)
 
-    val sram_addr_inc = tl_a_q.io.enq.fire && write_fsm_active
-    val sram_addr_next = Mux(sram_addr_inc, sram_addr_reg + 1.U, sram_addr_reg)
     sram_addr_reg := Mux(is_last_beat_ack, 0.U, sram_addr_next)
 
     tl_write_addr_fsm_reg := Mux(write_cmd_fire, tl_addr_reg.asUInt, tl_write_addr_fsm_reg)

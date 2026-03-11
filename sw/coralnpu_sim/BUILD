@@ -55,7 +55,10 @@ py_library(
 py_test(
     name = "coralnpu_v2_sim_test",
     srcs = ["coralnpu_v2_sim_test.py"],
-    data = ["//tests/cocotb/rvv/arithmetics:rvv_add_int8_m1"],
+    data = [
+        "//tests/cocotb/rvv/arithmetics:rvv_add_int8_m1",
+        "//tests/verilator_sim:htif_semihosting_test",
+    ],
     deps = [
         ":coralnpu_v2_sim_utils_lib",
         "@bazel_tools//tools/python/runfiles",

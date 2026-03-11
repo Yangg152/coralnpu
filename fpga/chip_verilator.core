@@ -22,7 +22,12 @@ filesets:
       - coralnpuv2:ip:coralnpu_tlul:0.1
       - lowrisc:dv_dpi_c:uartdpi:0.1
       - lowrisc:dv_dpi_sv:uartdpi:0.1
+      - lowrisc:dv_dpi_c:jtagdpi:0.1
+      - lowrisc:dv_dpi_sv:jtagdpi:0.1
       - com.google.coralnpu:fpga:spi_dpi_master:0.1
+      - com.google.coralnpu:fpga:display_dpi:0.1
+      - com.google.coralnpu:fpga:gpio_dpi:0.1
+      - coralnpuv2:ip:hm01b0_model:0.1
     files:
       - rtl/chip_verilator.sv
     file_type: systemVerilogSource

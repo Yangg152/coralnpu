@@ -34,7 +34,7 @@ object Fetch {
 class Fetch(p: Parameters) extends FetchUnit(p) {
   // Stub
   io.pc := 0.U
-  io.fault := false.B
+  io.fault := MakeInvalid(0.U(32.W))
   // This is the only compiled and tested configuration (at this time).
   assert(p.fetchAddrBits == 32)
   assert(p.fetchDataBits == 256)

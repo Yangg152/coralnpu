@@ -13,8 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-#ln -sf driver.sh objcopy example linker cmd
-
 PROG=$(basename "$0")
 DRIVER_DIR=$(dirname "$0")
 TOOLCHAIN="toolchain_coralnpu_v2"

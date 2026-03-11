@@ -202,9 +202,19 @@ class RvviTrace(p: Parameters) extends Module {
             f_wdata(i)(j) := MuxOR(f_wb_valid, wdata)
             f_wb(i)(j) := f_wb_valid
 
-            val v_wb_valid = valid && (wb_idx === j.U + p.rvvRegfileBaseAddr.U)
-            v_wdata(i)(j) := MuxOR(v_wb_valid, wdata)
-            v_wb(i)(j) := v_wb_valid
+            if (p.enableRvv) {
+                val vecWrites = io.rb.inst(i).bits.vecWrites.get
+                val hits = vecWrites.map(w => valid && w.valid && w.bits.idx === j.U)
+                val hit = hits.reduce(_|_)
+                val hitData = PriorityMux(hits, vecWrites.map(_.bits.data))
+
+                v_wdata(i)(j) := MuxOR(hit, hitData)
+                v_wb(i)(j) := hit
+            } else {
+                val v_wb_valid = valid && (wb_idx === j.U + p.rvvRegfileBaseAddr.U)
+                v_wdata(i)(j) := MuxOR(v_wb_valid, wdata)
+                v_wb(i)(j) := v_wb_valid
+            }
         }
 
         for (j <- 0 until 4096) {

@@ -42,7 +42,7 @@ class Core(p: Parameters, moduleName: String) extends Module with RequireAsyncRe
     val wfi = Output(Bool())
     val irq = Input(Bool())
     val debug_req = Input(Bool())
-    val dm = Option.when(p.useDebugModule)(new CoreDMIO(p))
+    val dm = new CoreDMIO(p)
 
     // Bus between core and instruction memories.
     val ibus = new IBusIO(p)
@@ -53,7 +53,6 @@ class Core(p: Parameters, moduleName: String) extends Module with RequireAsyncRe
 
     val iflush = new IFlushIO(p)
     val dflush = new DFlushIO(p)
-    val slog = new SLogIO(p)
 
     val debug = new DebugIO(p)
   })
@@ -74,13 +73,10 @@ class Core(p: Parameters, moduleName: String) extends Module with RequireAsyncRe
   io.wfi    := score.io.wfi
   score.io.irq := io.irq
 
-  if (p.useDebugModule) {
-    score.io.dm.get <> io.dm.get
-  }
+  score.io.dm <> io.dm
 
   io.iflush <> score.io.iflush
   io.dflush <> score.io.dflush
-  io.slog   := score.io.slog
   io.debug  <> score.io.debug
 
   // ---------------------------------------------------------------------------
@@ -108,8 +104,6 @@ object EmitCore extends App {
       p.enableFloat = arg.split("=")(1).toBoolean
     } else if (arg.startsWith("--enableVerification")) {
       p.enableVerification = arg.split("=")(1).toBoolean
-    } else if (arg.startsWith("--enableDebug")) {
-      p.enableDebug = arg.split("=")(1).toBoolean
     } else if (arg.startsWith("--lsuDataBits")) {
       p.lsuDataBits = arg.split("=")(1).toInt
     // itcmSizeKBytes, and dtcmSizeKBytes replace highmem flag

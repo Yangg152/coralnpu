@@ -79,7 +79,13 @@ def cc_embed_data(
 # From @tflite_micro//tensorflow/lite/micro/build_def.bzl, and paths.
 # Modified to point to the external repo as visibility of the package is restricted
 # TODO upstream changes to tflite-micro to fix this.
-def generate_cc_arrays(name, src, out, tags = []):
+def generate_cc_arrays(name, src, out, tags = [], extdata = False):
+    cmd = "$(location @tflite_micro//tensorflow/lite/micro/tools:generate_cc_arrays) $@"
+    if extdata:
+        cmd += " $< && sed -i 's/const unsigned char/const unsigned char __attribute__((section(\".extdata\"), aligned(16)))/' $@"
+    else:
+        cmd += " $<"
+
     native.genrule(
         name = name,
         srcs = [
@@ -89,6 +95,6 @@ def generate_cc_arrays(name, src, out, tags = []):
             out,
         ],
         tags = tags,
-        cmd = "$(location @tflite_micro//tensorflow/lite/micro/tools:generate_cc_arrays) $@ $<",
+        cmd = cmd,
         tools = ["@tflite_micro//tensorflow/lite/micro/tools:generate_cc_arrays"],
     )

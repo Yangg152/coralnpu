@@ -74,6 +74,15 @@ std::mutex bulk_read_mutex;
 int server_fd = -1;
 std::thread server_thread;
 std::atomic<bool> shutting_down{false};
+// Gate: the server thread waits for this before printing "listening" and
+// accepting a client.  Only set after a real reset cycle has been observed
+// (reset_seen) AND then deasserted, ensuring the SPI bridge is truly ready.
+std::atomic<bool> reset_done{false};
+// Set by spi_dpi_reset() to indicate that at least one reset pulse occurred.
+// Without this, spi_dpi_tick() would set reset_done on the very first cycle
+// before the actual reset, causing the loader to connect too early and have
+// its commands flushed when the real reset arrives.
+std::atomic<bool> reset_seen{false};
 
 struct SpiSignalState {
   uint8_t sck;
@@ -98,6 +107,7 @@ enum SpiFsmState {
   WRITE_REG_16B_WAIT_SETUP,
   WRITE_REG_16B_SHIFT,
   WRITE_REG_16B_END_BYTE,
+  WRITE_REG_16B_WAIT_RESTART,
   WRITE_REG_16B_END,
   POLL_REG_START,
   POLL_REG_CHECK,
@@ -114,6 +124,7 @@ enum SpiFsmState {
   READ_SPI_DOMAIN_16B_PREPARE,
   READ_SPI_DOMAIN_16B_SHIFT,
   READ_SPI_DOMAIN_16B_END_BYTE,
+  READ_SPI_DOMAIN_16B_WAIT_RESTART,
   READ_SPI_DOMAIN_16B_END,
   BULK_READ_START,
   BULK_READ_SHIFT_CMD_L,
@@ -207,6 +218,14 @@ void server_loop(int port) {
     perror("listen");
     return;
   }
+
+  // Wait for the simulation to deassert reset before accepting connections.
+  // This prevents clients from sending SPI commands while spi_dpi_reset()
+  // is still being called every cycle, which would flush the command queues.
+  while (!reset_done.load() && !shutting_down.load()) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  if (shutting_down) return;
 
   std::cout << "DPI: Server listening on port " << port << std::endl;
 
@@ -307,6 +326,13 @@ void spi_dpi_close(struct SpiDpiFsmState* ctx) {
 }
 
 void spi_dpi_reset(struct SpiDpiFsmState* ctx) {
+  // Record that a real reset pulse has occurred.  The server thread won't
+  // accept connections until reset_done is set, and reset_done is only set
+  // by spi_dpi_tick() when reset_seen is true — i.e., after a real reset
+  // cycle has completed and then deasserted.
+  reset_seen.store(true, std::memory_order_release);
+  reset_done.store(false, std::memory_order_release);
+
   // Reset the state machine
   ctx->init();
 
@@ -480,9 +506,18 @@ void handle_write_reg_16b(unsigned char miso, struct SpiDpiFsmState* ctx) {
       if (ctx->write_16b_sub_idx >= 4) {
         ctx->state = WRITE_REG_16B_END;
       } else {
-        // In packed mode, there are no delays between bytes.
+        // Toggle CSB to restart the transaction for the next register.
+        ctx->signal_state.csb = 1;
+        ctx->state = WRITE_REG_16B_WAIT_RESTART;
+        ctx->cycle_wait_count = 2; // Wait a few cycles with CSB high
+      }
+      break;
+
+    case WRITE_REG_16B_WAIT_RESTART:
+      if (--ctx->cycle_wait_count <= 0) {
+        ctx->signal_state.csb = 0;
         ctx->state = WRITE_REG_16B_WAIT_SETUP;
-        ctx->cycle_wait_count = 0; // Go straight to next byte
+        ctx->cycle_wait_count = 1;
       }
       break;
 
@@ -947,7 +982,18 @@ void handle_read_spi_domain_reg_16b(unsigned char miso, struct SpiDpiFsmState* c
       if (ctx->read_16b_sub_idx >= 4) {
         ctx->state = READ_SPI_DOMAIN_16B_END;
       } else {
+        // Toggle CSB to restart the transaction for the next register.
+        ctx->signal_state.csb = 1;
+        ctx->state = READ_SPI_DOMAIN_16B_WAIT_RESTART;
+        ctx->cycle_wait_count = 2; // Wait a few cycles with CSB high
+      }
+      break;
+
+    case READ_SPI_DOMAIN_16B_WAIT_RESTART:
+      if (--ctx->cycle_wait_count <= 0) {
+        ctx->signal_state.csb = 0;
         ctx->state = READ_SPI_DOMAIN_16B_PREPARE;
+        ctx->cycle_wait_count = 1;
       }
       break;
 
@@ -968,6 +1014,15 @@ void handle_read_spi_domain_reg_16b(unsigned char miso, struct SpiDpiFsmState* c
 
 void spi_dpi_tick(struct SpiDpiFsmState* ctx, unsigned char* sck, unsigned char* csb, unsigned char* mosi,
                   unsigned char miso) {
+
+  // Signal to the server thread that reset has deasserted and the SPI bridge
+  // is ready.  Only do this after a real reset pulse has been observed
+  // (reset_seen), preventing premature connection acceptance during the
+  // pre-reset cycles (SetInitialResetDelay).
+  if (!reset_done.load(std::memory_order_relaxed) &&
+      reset_seen.load(std::memory_order_acquire)) {
+    reset_done.store(true, std::memory_order_release);
+  }
 
   // Only check for new commands if we are idle.
   if (ctx->state == IDLE) {
@@ -1074,6 +1129,7 @@ void spi_dpi_tick(struct SpiDpiFsmState* ctx, unsigned char* sck, unsigned char*
     case WRITE_REG_16B_WAIT_SETUP:
     case WRITE_REG_16B_SHIFT:
     case WRITE_REG_16B_END_BYTE:
+    case WRITE_REG_16B_WAIT_RESTART:
     case WRITE_REG_16B_END:
       handle_write_reg_16b(miso, ctx);
       break;
@@ -1082,6 +1138,7 @@ void spi_dpi_tick(struct SpiDpiFsmState* ctx, unsigned char* sck, unsigned char*
     case READ_SPI_DOMAIN_16B_PREPARE:
     case READ_SPI_DOMAIN_16B_SHIFT:
     case READ_SPI_DOMAIN_16B_END_BYTE:
+    case READ_SPI_DOMAIN_16B_WAIT_RESTART:
     case READ_SPI_DOMAIN_16B_END:
       handle_read_spi_domain_reg_16b(miso, ctx);
       break;

@@ -14,6 +14,19 @@
 
 package(default_visibility = ["//visibility:public"])
 
+load("@rules_hdl//verilog:providers.bzl", "verilog_library")
+
+verilog_library(
+    name = "fpga_rtl",
+    srcs = [
+        "top_pkg.sv",
+        "top_racl_pkg.sv",
+    ],
+    deps = [
+        "//fpga/ip/coralnpu_tlul",
+    ],
+)
+
 filegroup(
     name = "rtl_files",
     srcs = glob([

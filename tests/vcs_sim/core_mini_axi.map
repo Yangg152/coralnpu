@@ -5,10 +5,6 @@ io_fault                            1       bit         sc_logic
 io_wfi                              1       bit         sc_logic
 io_irq                              1       bit         sc_logic
 
-io_slog_valid                       1       bit         sc_logic
-io_slog_addr                        5       bit_vector  sc_lv
-io_slog_data                        32      bit_vector  sc_lv
-
 io_debug_en                         4       bit_vector  sc_lv
 io_debug_cycles                     32      bit_vector  sc_lv
 io_debug_addr_0                     32      bit_vector  sc_lv

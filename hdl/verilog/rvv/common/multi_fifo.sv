@@ -151,26 +151,57 @@ module multi_fifo
         assign current_rptr_psh[i] = i-remain_count;
       end
 
-      if (CHAOS_PUSH) begin
-        for (i=0; i<N; i++) begin : gen_dataout
-          always_ff @(posedge clk) begin
-            if ((i<remain_count)&(|pop))
-              dataout[i] <= mem[current_rptr_mem[i]]; 
-            else if ((push_seq[current_rptr_psh[i]]&(current_rptr_psh[i]<(DEPTH_BITS)'(M)))&
-                     ((|pop)|(|push_seq))
-                    )
-              dataout[i] <= datain_seq[current_rptr_psh[i]];
+      if (ASYNC_RSTN) begin
+        if (CHAOS_PUSH) begin
+          for (i=0; i<N; i++) begin : gen_dataout
+            always_ff @(posedge clk, negedge rst_n) begin
+              if (!rst_n)
+                dataout[i] <= 'b0;
+              else if ((i<remain_count)&(|pop)) 
+                dataout[i] <= mem[current_rptr_mem[i]]; 
+              else if ((push_seq[current_rptr_psh[i]]&(current_rptr_psh[i]<(DEPTH_BITS)'(M)))&
+                       ((|pop)|(|push_seq))
+                      )
+                dataout[i] <= datain_seq[current_rptr_psh[i]];
+            end
+          end
+        end else begin
+          for (i=0; i<N; i++) begin : gen_dataout
+            always_ff @(posedge clk, negedge rst_n) begin
+              if (!rst_n)
+                dataout[i] <= 'b0;
+              else if ((i<remain_count)&(|pop))
+                dataout[i] <= mem[current_rptr_mem[i]]; 
+              else if ((push[current_rptr_psh[i]]&(current_rptr_psh[i]<(DEPTH_BITS)'(M)))&
+                       ((|pop)|(|push))
+                      )
+                dataout[i] <= datain[current_rptr_psh[i]];
+            end
           end
         end
-      end else begin
-        for (i=0; i<N; i++) begin : gen_dataout
-          always_ff @(posedge clk) begin
-            if ((i<remain_count)&(|pop))
-              dataout[i] <= mem[current_rptr_mem[i]]; 
-            else if ((push[current_rptr_psh[i]]&(current_rptr_psh[i]<(DEPTH_BITS)'(M)))&
-                     ((|pop)|(|push))
-                    )
-              dataout[i] <= datain[current_rptr_psh[i]];
+      end 
+      else begin
+        if (CHAOS_PUSH) begin
+          for (i=0; i<N; i++) begin : gen_dataout
+            always_ff @(posedge clk) begin
+              if ((i<remain_count)&(|pop)) 
+                dataout[i] <= mem[current_rptr_mem[i]]; 
+              else if ((push_seq[current_rptr_psh[i]]&(current_rptr_psh[i]<(DEPTH_BITS)'(M)))&
+                       ((|pop)|(|push_seq))
+                      )
+                dataout[i] <= datain_seq[current_rptr_psh[i]];
+            end
+          end
+        end else begin
+          for (i=0; i<N; i++) begin : gen_dataout
+            always_ff @(posedge clk) begin
+              if ((i<remain_count)&(|pop))
+                dataout[i] <= mem[current_rptr_mem[i]]; 
+              else if ((push[current_rptr_psh[i]]&(current_rptr_psh[i]<(DEPTH_BITS)'(M)))&
+                       ((|pop)|(|push))
+                      )
+                dataout[i] <= datain[current_rptr_psh[i]];
+            end
           end
         end
       end

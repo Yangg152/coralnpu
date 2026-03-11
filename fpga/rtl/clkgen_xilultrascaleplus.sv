@@ -24,6 +24,7 @@ module clkgen_xilultrascaleplus
      output clk_main_o,
      output clk_48MHz_o,
      output clk_aon_o,
+     output clk_spim_o,
      output rst_no,
      output locked_o);
   logic locked_pll;
@@ -35,6 +36,8 @@ module clkgen_xilultrascaleplus
   logic clk_fb_unbuf;
   logic clk_48_buf;
   logic clk_48_unbuf;
+  logic clk_spim_buf;
+  logic clk_spim_unbuf;
   logic clk_aon_buf;
   logic clk_aon_unbuf;
   logic clk_ibufds_o;
@@ -59,6 +62,9 @@ module clkgen_xilultrascaleplus
           .CLKOUT1_DIVIDE(25),
           .CLKOUT1_PHASE(0.000),
           .CLKOUT1_DUTY_CYCLE(0.500),
+          .CLKOUT2_DIVIDE(12),
+          .CLKOUT2_PHASE(0.000),
+          .CLKOUT2_DUTY_CYCLE(0.500),
           // With CLKOUT4_CASCADE, CLKOUT6's divider is an input to CLKOUT4's
           // divider. The effective ratio is a multiplication of the two.
           .CLKOUT4_DIVIDE(40),
@@ -73,7 +79,7 @@ module clkgen_xilultrascaleplus
           .CLKOUT0B(),
           .CLKOUT1(clk_48_unbuf),
           .CLKOUT1B(),
-          .CLKOUT2(),
+          .CLKOUT2(clk_spim_unbuf),
           .CLKOUT2B(),
           .CLKOUT3(),
           .CLKOUT3B(),
@@ -112,6 +118,9 @@ module clkgen_xilultrascaleplus
   BUFGCE clk_fb_bufgce(.I(clk_fb_unbuf),
                        .O(clk_fb_buf));
 
+  BUFGCE clk_spim_bufgce(.I(clk_spim_unbuf),
+                         .O(clk_spim_buf));
+
   BUFGCE clk_aon_bufgce(.I(clk_aon_unbuf),
                         .O(clk_aon_buf));
 
@@ -133,6 +142,7 @@ module clkgen_xilultrascaleplus
   assign clk_main_o = clk_10_buf;
   assign clk_48MHz_o = clk_48_buf;
   assign clk_aon_o = clk_aon_buf;
+  assign clk_spim_o = clk_spim_buf;
 
   // reset
   assign rst_no = locked_pll & rst_ni & srst_ni;

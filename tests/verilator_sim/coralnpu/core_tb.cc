@@ -90,7 +90,6 @@ static void Core_run(const char* name, const char* bin, const int cycles,
   sc_signal<bool> io_dflush_ready;
   sc_signal<bool> io_dflush_all;
   sc_signal<bool> io_dflush_clean;
-  sc_signal<bool> io_slog_valid;
   sc_signal<sc_bv<32> > io_csr_in_value_0;
   sc_signal<sc_bv<32> > io_csr_in_value_1;
   sc_signal<sc_bv<32> > io_csr_in_value_2;
@@ -134,8 +133,6 @@ static void Core_run(const char* name, const char* bin, const int cycles,
   sc_signal<sc_bv<KP_lsuDataBits / 8> > io_ebus_dbus_wmask;
   sc_signal<sc_bv<KP_lsuDataBits> > io_ebus_dbus_rdata;
   sc_signal<bool> io_ebus_internal;
-  sc_signal<sc_bv<5> > io_slog_addr;
-  sc_signal<sc_bv<32> > io_slog_data;
   sc_signal<sc_bv<4> > io_debug_en;
   sc_signal<sc_bv<32> > io_debug_cycles;
   sc_signal<bool> io_debug_dbus_valid;
@@ -229,7 +226,6 @@ static void Core_run(const char* name, const char* bin, const int cycles,
   core.io_dflush_ready(io_dflush_ready);
   core.io_dflush_all(io_dflush_all);
   core.io_dflush_clean(io_dflush_clean);
-  core.io_slog_valid(io_slog_valid);
   core.io_csr_in_value_0(io_csr_in_value_0);
   core.io_csr_in_value_1(io_csr_in_value_1);
   core.io_csr_in_value_2(io_csr_in_value_2);
@@ -269,8 +265,6 @@ static void Core_run(const char* name, const char* bin, const int cycles,
   core.io_ebus_dbus_wmask(io_ebus_dbus_wmask);
   core.io_ebus_dbus_rdata(io_ebus_dbus_rdata);
   core.io_ebus_internal(io_ebus_internal);
-  core.io_slog_addr(io_slog_addr);
-  core.io_slog_data(io_slog_data);
   core.io_debug_en(io_debug_en);
   core.io_debug_cycles(io_debug_cycles);
   core.io_debug_dbus_valid(io_debug_dbus_valid);
@@ -344,9 +338,6 @@ static void Core_run(const char* name, const char* bin, const int cycles,
 
   dbg.clock(tb.clock);
   dbg.reset(tb.reset);
-  dbg.io_slog_valid(io_slog_valid);
-  dbg.io_slog_addr(io_slog_addr);
-  dbg.io_slog_data(io_slog_data);
 
   if (trace) {
     tb.trace(&core);

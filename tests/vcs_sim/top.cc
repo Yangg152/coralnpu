@@ -12,9 +12,6 @@ sc_top::sc_top(sc_core::sc_module_name name)
   core.io_irq(irq);
   core.io_te(te);
 
-  core.io_slog_valid(slog.valid);
-  core.io_slog_addr(slog.addr);
-  core.io_slog_data(slog.data);
   core.io_debug_en(debug.en);
   core.io_debug_cycles(debug.cycles);
   core.io_debug_addr_0(debug.addr_0);
@@ -77,9 +74,8 @@ sc_top::sc_top(sc_core::sc_module_name name)
   core.io_debug_float_writeData_0_bits_data(debug.float_writeData_0_bits_data);
   core.io_debug_float_writeData_1_bits_data(debug.float_writeData_1_bits_data);
 #endif
-#if (KP_useDebugModule == true)
   core.io_dm_req_valid(dm.req_valid);
-  core.io_dm_req_ready(dm.req_valid);
+  core.io_dm_req_ready(dm.req_ready);
   core.io_dm_req_bits_address(dm.req_bits_address);
   core.io_dm_req_bits_data(dm.req_bits_data);
   core.io_dm_req_bits_op(dm.req_bits_op);
@@ -87,7 +83,6 @@ sc_top::sc_top(sc_core::sc_module_name name)
   core.io_dm_rsp_ready(dm.rsp_valid);
   core.io_dm_rsp_bits_data(dm.rsp_bits_data);
   core.io_dm_rsp_bits_op(dm.rsp_bits_op);
-#endif
 
 #define BIND_RB_SIGNALS(x) \
   core.io_debug_rb_inst_##x##_valid(debug.rb_inst_##x##_valid); \

@@ -8,10 +8,10 @@ Subject: [PATCH 3/3] Fill in unreachable state in fpnew_divsqrt_th_32 fsm.
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/src/fpnew_divsqrt_th_32.sv b/src/fpnew_divsqrt_th_32.sv
-index a74e7e6..0cae2a3 100644
+index cb5b5f2..0cae2a3 100644
 --- a/src/fpnew_divsqrt_th_32.sv
 +++ b/src/fpnew_divsqrt_th_32.sv
-@@ -143,7 +143,7 @@ module fpnew_divsqrt_th_32 #(
+@@ -145,7 +145,7 @@ module fpnew_divsqrt_th_32 #(
    logic data_is_held;           // data in hold register is valid
    logic unit_busy;              // valid data in flight
    // FSM states
@@ -22,4 +22,3 @@ index a74e7e6..0cae2a3 100644
    // Operations are gated by the FSM ready. Invalid input ops run a sqrt to not lose illegal instr.
 -- 
 2.50.1.565.gc32cd1483b-goog
-

@@ -124,9 +124,6 @@ class DecodedInstruction(p: Parameters) extends Bundle {
   val flushat = Bool()
   val flushall = Bool()
 
-  // Scalar logging.
-  val slog = Bool()
-
   val rvv = Option.when(p.enableRvv)(Valid(new RvvCompressedInstruction()))
 
   val float = Option.when(p.enableFloat)(Valid(new FloatInstruction()))
@@ -194,12 +191,12 @@ class DecodedInstruction(p: Parameters) extends Bundle {
 
   def readsRs1(): Bool = {
     isCondBr() || isAluReg() || isAluImm() || isAlu1Bit() || isAlu2Bit() ||
-    isCsr() || isMul() || isDvu() || slog || jalr || floatReadsScalarRs1() ||
+    isCsr() || isMul() || isDvu() || jalr || floatReadsScalarRs1() ||
     (if (p.enableRvv) { rvv.get.valid && rvv.get.bits.readsRs1() } else { false.B })
   }
   def readsRs2(): Bool = {
     isCondBr() || isAluReg() || isAlu2Bit() || isScalarStore() || isCsrReg() ||
-    isMul() || isDvu() || slog ||
+    isMul() || isDvu() ||
     (if (p.enableRvv) { rvv.get.valid && rvv.get.bits.readsRs2() } else { false.B })
   }
 
@@ -282,14 +279,13 @@ class Dispatch(p: Parameters) extends Module {
 
     val fbusPortAddr = Option.when(p.enableFloat)(Output(UInt(5.W)))
 
-    // Scalar logging.
-    val slog = Output(Bool())
-
     val retirement_buffer_nSpace = Input(UInt(5.W))
     val retirement_buffer_empty = Input(Bool())
     val retirement_buffer_trap_pending = Input(Bool())
-    val single_step = Option.when(p.useDebugModule)(Input(Bool()))
-    val debug_mode = Option.when(p.useDebugModule)(Input(Bool()))
+    val single_step = Input(Bool())
+    val debug_mode = Input(Bool())
+    val branch = Output(Vec(p.instructionLanes, Bool()))
+    val jump = Output(Vec(p.instructionLanes, Bool()))
   })
 }
 
@@ -306,6 +302,10 @@ class DispatchV2(p: Parameters) extends Dispatch(p) {
   // include instructions that trigger context switches. Treat fences as jumps
   // as well.
   val isJump = decodedInsts.map(x => x.isJump() || x.isFency())
+  // NB: Only consumer of io.jump is ROB, for now.
+  // We really only want "normal" (e.g. not mret or ecall) control-flow instructions here,
+  // not things that also have interesting properties (like fences).
+  io.jump := decodedInsts.map(x => x.isJump() && !x.ecall && !x.mret)
   val jumped = isJump.scan(false.B)(_ || _)
 
   // ---------------------------------------------------------------------------
@@ -313,6 +313,7 @@ class DispatchV2(p: Parameters) extends Dispatch(p) {
   // The operations that can be dispatched after branching are ones that can be
   // completed in one cycle. In practice, this means Alu and Bru operations
   val isBranch = decodedInsts.map(_.isCondBr())
+  io.branch := isBranch
   val branched = isBranch.scan(false.B)(_ || _)
   val branchInterlock = (0 until p.instructionLanes).map(i => branched(i))
 
@@ -468,7 +469,7 @@ class DispatchV2(p: Parameters) extends Dispatch(p) {
   // ---------------------------------------------------------------------------
   // Single step
   val singleStepInterlock = (0 until p.instructionLanes).map(i =>
-    !io.single_step.getOrElse(false.B) || ((i == 0).B && coreIdle))
+    !io.single_step || ((i == 0).B && coreIdle))
 
   // ---------------------------------------------------------------------------
   // MPAUSE
@@ -667,7 +668,12 @@ class DispatchV2(p: Parameters) extends Dispatch(p) {
       ))
       val csr_bits_index = io.inst(0).bits.inst(31,20)
       val (csr_address, csr_address_valid) = CsrAddress.safe(csr_bits_index)
-      io.csr.valid := tryDispatch && csr.valid && csr_address_valid && (if (p.enableFloat) { io.float.get.ready } else { true.B })
+      // Stall reads of vxsat (0x009) and vcsr (0x00F) until the vector unit is
+      // idle. Only these CSRs can be modified by in-flight vector instructions
+      // (saturating arithmetic sets vxsat; vcsr contains vxsat as a bitfield).
+      val isVxsatOrVcsr = csr_bits_index === 0x009.U || csr_bits_index === 0x00F.U
+      val rvvIdleOrNotVxsat = io.rvvIdle.getOrElse(true.B) || !isVxsatOrVcsr
+      io.csr.valid := tryDispatch && csr.valid && csr_address_valid && (if (p.enableFloat) { io.float.get.ready } else { true.B }) && rvvIdleOrNotVxsat
       io.csr.bits.addr := rdAddr(i)
       io.csr.bits.index := csr_bits_index
       io.csr.bits.rs1 := rs1Addr(i)
@@ -675,12 +681,6 @@ class DispatchV2(p: Parameters) extends Dispatch(p) {
       io.csrFault(0) := csr.valid && !csr_address_valid && tryDispatch
     } else {
       io.csrFault(i) := false.B
-    }
-
-    // -------------------------------------------------------------------------
-    // Slog
-    if (i == 0) {
-      io.slog := tryDispatch && d.slog
     }
 
     // -------------------------------------------------------------------------
@@ -707,7 +707,7 @@ class DispatchV2(p: Parameters) extends Dispatch(p) {
 
     // Set next lastReady if dispatched.
     val dispatched = Seq(io.alu(i).fire, io.bru(i).fire, io.mlu(i).fire, io.dvu(i).fire, io.lsu(i).fire) ++
-      Option.when(i == 0)(Seq(io.csr.valid, io.slog, fenceValid)).getOrElse(Seq()) ++
+      Option.when(i == 0)(Seq(io.csr.valid, fenceValid)).getOrElse(Seq()) ++
       Option.when(p.enableRvv)(Seq(io.rvv.get(i).fire)).getOrElse(Seq()) ++
       Option.when(p.enableFloat && i == 0)(Seq(io.float.get.fire)).getOrElse(Seq())
     lastReady(i + 1) := dispatched.reduce(_||_)
@@ -877,9 +877,6 @@ object DecodeInstruction {
     d.zexth := op === BitPat("b0000100_00000_?????_100_?????_0110011")
     d.rori  := op === BitPat("b0110000_?????_?????_101_?????_0010011")
 
-    // Decode scalar log.
-    val slog = op === BitPat("b01111_00_00000_?????_0??_00000_11101_11")
-
     // [extensions] Core controls.
     d.ebreak := op === BitPat("b000000000001_00000_000_00000_11100_11")
     d.ecall  := op === BitPat("b000000000000_00000_000_00000_11100_11")
@@ -891,9 +888,6 @@ object DecodeInstruction {
     d.fencei   := op === BitPat("b0000_0000_0000_00000_001_00000_0001111")
     d.flushat  := op === BitPat("b0010?_??_00000_?????_000_00000_11101_11") && op(19,15) =/= 0.U
     d.flushall := op === BitPat("b0010?_??_00000_00000_000_00000_11101_11")
-
-    // [extensions] Scalar logging.
-    d.slog := slog
 
 
     if (p.enableFloat) {
@@ -924,8 +918,6 @@ object DecodeInstruction {
       d.flushat  := false.B
       d.flushall := false.B
 
-      d.slog := false.B
-
       if (p.enableFloat) {
         d.float.get := MakeInvalid(new FloatInstruction)
       }
@@ -951,7 +943,7 @@ object DecodeInstruction {
                       d.sextb, d.sexth, d.zexth,
                       d.rol, d.ror, d.orcb, d.rev8, d.rori,
                       d.ebreak, d.ecall, d.wfi,
-                      d.mpause, d.mret, d.fencei, d.flushat, d.flushall, d.slog,
+                      d.mpause, d.mret, d.fencei, d.flushat, d.flushall,
                       d.rvv.map(_.valid).getOrElse(false.B),
                       d.float.map(_.valid).getOrElse(false.B))
 

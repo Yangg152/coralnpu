@@ -64,11 +64,11 @@ class Regfile(p: Parameters) extends Module {
     val target = Vec(p.instructionLanes, new RegfileBranchTargetIO)
     val linkPort = new RegfileLinkPortIO
     val busPort = new RegfileBusPortIO(p)
-    val debugBusPort = Option.when(p.useDebugModule)(new Bundle {
+    val debugBusPort = new Bundle {
       val idx = Input(UInt(5.W))
       val data = Output(UInt(32.W))
-    })
-    val debugWriteValid = Option.when(p.useDebugModule)(Input(Bool()))
+    }
+    val debugWriteValid = Input(Bool())
 
     // Execute cycle.
     val readData = Vec(p.instructionLanes * 2, new RegfileReadDataIO)
@@ -172,9 +172,7 @@ class Regfile(p: Parameters) extends Module {
     wdata(i) := VecAt(writeData, idx)
     rwdata(i) := Mux(write, wdata(i), rdata(i))
   }
-  if (p.useDebugModule) {
-    io.debugBusPort.get.data := VecAt(regfile, io.debugBusPort.get.idx)
-  }
+  io.debugBusPort.data := VecAt(regfile, io.debugBusPort.idx)
 
   for (i <- 0 until (p.instructionLanes * 2)) {
     nxtReadDataBits(i) := Mux(
@@ -232,7 +230,7 @@ class Regfile(p: Parameters) extends Module {
   }
 
   val scoreboard_error = RegInit(false.B)
-  val dm_write_valid = io.debugWriteValid.getOrElse(false.B)
+  val dm_write_valid = io.debugWriteValid
   scoreboard_error := ((scoreboard & scoreboard_clr) =/= scoreboard_clr) && !dm_write_valid
   assert(!scoreboard_error)
 }

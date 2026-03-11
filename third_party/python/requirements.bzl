@@ -428,3 +428,29 @@ def install_deps():
             ],
         ),
     )
+
+    http_archive(
+        name = "coralnpu_pip_deps_pillow",
+        urls = [
+            "https://files.pythonhosted.org/packages/5c/1f/8e66ab9be3aaf1435bc03edd1ebdf58ffcd17f7349c1d970cafe87af27d9/pillow-12.1.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+        ],
+        sha256 = "1f345e7bc9d7f368887c712aa5054558bad44d2a301ddf9248599f4161abc7c0",
+        type = "zip",
+        build_file_content = _build_file_content(pypi_name = "Pillow", pypi_version = "12.1.0"),
+    )
+
+    http_archive(
+        name = "coralnpu_pip_deps_libusb_package",
+        urls = [
+            "https://files.pythonhosted.org/packages/c9/0f/fd203fb1fa5eda1d446f345d84205f23533767e6ef837a7c77a2599d5783/libusb_package-1.0.26.3-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+        ],
+        sha256 = "80a2041331c087d5887969405837f86c8422120fe9ba3e6faa44bf4810f07b71",
+        type = "zip",
+        build_file_content = _build_file_content(
+            pypi_name = "libusb-package",
+            pypi_version = "1.0.26.3",
+            deps = [
+                "@coralnpu_pip_deps_importlib_resources//:pkg",
+            ]
+        ),
+    )

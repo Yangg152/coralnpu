@@ -17,6 +17,8 @@ import argparse
 import math
 import time
 import os
+import libusb_package
+import usb.core
 from pyftdi.ftdi import Ftdi, FtdiFeatureError
 from elftools.elf.elffile import ELFFile
 from coralnpu_test_utils.spi_constants import SpiRegAddress, SpiCommand, TlStatus
@@ -26,6 +28,14 @@ class FtdiSpiMaster:
 
     def __init__(self, usb_serial, ftdi_port=1, csr_base_addr=0x30000):
         """Initializes the FTDI SPI master."""
+        backend = libusb_package.get_libusb1_backend()
+        if backend is None:
+            raise RuntimeError("Could not find a USB backend even with libusb-package.")
+
+        # We perform a dummy find using the custom backend.
+        # This often "registers" the backend for the current process.
+        usb.core.find(backend=backend)
+
         self.csr_base_addr = csr_base_addr
         # pyftdi uses ftdi://<vendor>:<product>/<serial> or ftdi://<vendor>:<product>:<index>
         url = f'ftdi://::{usb_serial}/{ftdi_port}'
@@ -42,6 +52,11 @@ class FtdiSpiMaster:
         # line before the FTDI chip samples it.
         # Opcode: 0x8C = Enable 3-Phase Clocking
         self.ftdi.write_data(bytes([0x8C]))
+
+    def close(self):
+        if self.ftdi:
+            self.ftdi.close()
+            self.ftdi = None
 
     def _get_spi_exchange_cmd(self, write_data=b'', read_len=0, extra_cycles=0):
         """
@@ -311,10 +326,13 @@ class FtdiSpiMaster:
             elf_file = ELFFile(f)
             entry_point = elf_file.header["e_entry"]
             for segment in elf_file.iter_segments(type="PT_LOAD"):
-                paddr = segment.header.p_paddr
+                paddr = segment.header.p_vaddr
                 data = segment.data()
+                if not data:
+                    continue
                 total_bytes_transferred += len(data)
                 data_ptr = 0
+                print(f'vaddr: {paddr:x} len: {len(data)}')
 
                 for i in range(0, len(data), 256):
                     prep_start_time = time.time()
@@ -487,7 +505,7 @@ class FtdiSpiMaster:
         print("Timed out waiting for core to halt.")
         return False
 
-    def read_data(self, address, size):
+    def read_data(self, address, size, verbose=True):
         """
         Reads a block of data of a given size from a memory address using
         efficient, chunked bulk TileLink transactions.
@@ -594,7 +612,7 @@ class FtdiSpiMaster:
         total_duration = (total_prep_duration + total_setup_duration +
                           total_hw_wait_duration + total_spi_read_duration +
                           total_ack_duration)
-        if total_duration > 0:
+        if verbose and total_duration > 0:
             rate_kbs = (size / 1024) / total_duration
             print(f"Read complete. Transferred {size} bytes "
                   f"in {total_duration:.2f} seconds ({rate_kbs:.2f} KB/s).")

@@ -21,9 +21,6 @@
 #include <cstdio>
 #include <malloc.h>
 
-// TODO(atv): CoralNPU V2 toolchain doesn't support the log family.
-// #define flog(s) asm volatile("flog %0" : : "r"(s))
-
 void* __dso_handle = reinterpret_cast<void*>(&__dso_handle);
 
 extern "C" int _close(int file) { return -1; }
@@ -96,7 +93,6 @@ extern "C" int _write(int file, char* buf, int nbytes) {
       _write_line_buffer[len] = '\0';
     }
     if ((_write_line_buffer[len] == '\0')) {
-      // flog(_write_line_buffer);
       len = 0;
     }
     _write_line_buffer_len = len;

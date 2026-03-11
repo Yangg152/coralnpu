@@ -15,6 +15,7 @@
 load("@bazel_skylib//rules:common_settings.bzl", "string_list_flag")
 load("@lowrisc_opentitan_gh//rules:fusesoc.bzl", "fusesoc_build")
 load("//rules:coralnpu_v2.bzl", "coralnpu_v2_binary")
+load("//rules:coralnpu_v2_sim_test.bzl", "coralnpu_v2_sim_test")
 load("//rules:utils.bzl", "cc_embed_data")
 load("@internal_check//:status.bzl", internal_exists = "FOLDER_EXISTS")
 
@@ -27,6 +28,9 @@ filegroup(
     name = "rtl_files",
     srcs = glob(["**/*.sv"]) + glob(["**/*.core"]) + [
         "//fpga/ip/spi_dpi_master:rtl_files",
+        "//fpga/ip/display_dpi:rtl_files",
+        "//fpga/ip/gpio_dpi:rtl_files",
+        "//fpga/ip/i2c_master:rtl_files",
         "//fpga/ip/coralnpu_tlul:rtl_files",
         "//fpga/ip/coralnpu_chisel_subsystem_default:rtl_files",
         "//fpga/ip/coralnpu_chisel_subsystem_highmem:rtl_files",
@@ -53,6 +57,7 @@ VERILATOR_OPTIONS_COMMON = [
     "-DRVFI",
     "-DUSE_GENERIC",
     "-DUSE_DPI_MEMORY",
+    "-DTB_SUPPORT",
 ]
 
 string_list_flag(
@@ -79,10 +84,54 @@ cc_embed_data(
     var_name = "add_uint32_m1_bin",
 )
 
+cc_library(
+    name = "uart",
+    srcs = ["sw/uart.c"],
+    hdrs = ["sw/uart.h"],
+)
+
 coralnpu_v2_binary(
     name = "add_uint32_m1",
     srcs = ["sw/add_uint32_m1.cc"],
     copts = ["-DCLOCK_FREQUENCY_MHZ=" + _CLOCK_FREQUENCY_MHZ],
+    deps = [":uart"],
+)
+
+coralnpu_v2_binary(
+    name = "spi_test",
+    srcs = ["sw/spi_test.cc"],
+    copts = ["-DCLOCK_FREQUENCY_MHZ=" + _CLOCK_FREQUENCY_MHZ],
+    deps = [":uart"],
+)
+
+coralnpu_v2_binary(
+    name = "gpio_test",
+    srcs = ["sw/gpio_test.cc"],
+    copts = ["-DCLOCK_FREQUENCY_MHZ=" + _CLOCK_FREQUENCY_MHZ],
+    deps = [":uart"],
+)
+
+coralnpu_v2_sim_test(
+    name = "trivial_pass_sim_test",
+    srcs = ["sw/trivial_pass_test.cc"],
+    copts = ["-DCLOCK_FREQUENCY_MHZ=" + _CLOCK_FREQUENCY_MHZ],
+    deps = [":uart"],
+)
+
+coralnpu_v2_binary(
+    name = "i2c_camera_test",
+    srcs = ["sw/i2c_camera_test.cc"],
+    copts = ["-DCLOCK_FREQUENCY_MHZ=" + _CLOCK_FREQUENCY_MHZ],
+    deps = [":uart"],
+)
+
+coralnpu_v2_binary(
+    name = "i2c_camera_test_highmem",
+    srcs = ["sw/i2c_camera_test.cc"],
+    copts = ["-DCLOCK_FREQUENCY_MHZ=" + _CLOCK_FREQUENCY_MHZ],
+    itcm_size_kbytes = 1024,
+    dtcm_size_kbytes = 1024,
+    deps = [":uart"],
 )
 
 filegroup(
@@ -126,14 +175,21 @@ fusesoc_build(
     name = "build_chip_verilator",
     srcs = CORALNPU_SOC_SRCS + [
         "//fpga/ip/spi_dpi_master:dpi_files",
+        "//fpga/ip/display_dpi:dpi_files",
+        "//fpga/ip/gpio_dpi:dpi_files",
         "@lowrisc_opentitan_gh//hw:dpi_files",
     ],
     cores = CORALNPU_SOC_CORES + [
         ":chip_verilator.core",
+        "//fpga/ip/i2c_master:i2c_master.core",
         "//fpga/ip/coralnpu_chisel_subsystem_default:coralnpu_chisel_subsystem_default.core",
         "//fpga/ip/spi_dpi_master:spi_dpi_master.core",
+        "//fpga/ip/display_dpi:display_dpi.core",
+        "//fpga/ip/gpio_dpi:gpio_dpi.core",
         "@lowrisc_opentitan_gh//hw/dv:dpi/uartdpi/uartdpi.core",
         "@lowrisc_opentitan_gh//hw/dv:dpi/uartdpi/uartdpi_sv.core",
+        "@lowrisc_opentitan_gh//hw/dv:dpi/jtagdpi/jtagdpi.core",
+        "@lowrisc_opentitan_gh//hw/dv:dpi/jtagdpi/jtagdpi_sv.core",
     ],
     flags = [
         "--ClockFrequencyMhz=" + _CLOCK_FREQUENCY_MHZ,
@@ -145,19 +201,22 @@ fusesoc_build(
     systems = ["com.google.coralnpu:fpga:chip_verilator:0.1"],
     target = "sim",
     verilator_options = ":verilator_options_default",
-    tags = ["manual"],
 )
 
 fusesoc_build(
     name = "build_chip_verilator_highmem",
     srcs = CORALNPU_SOC_SRCS + [
         "//fpga/ip/spi_dpi_master:dpi_files",
+        "//fpga/ip/display_dpi:dpi_files",
+        "//fpga/ip/gpio_dpi:dpi_files",
         "@lowrisc_opentitan_gh//hw:dpi_files",
     ],
     cores = CORALNPU_SOC_CORES + [
         ":chip_verilator.core",
+        "//fpga/ip/i2c_master:i2c_master.core",
         "//fpga/ip/coralnpu_chisel_subsystem_highmem:coralnpu_chisel_subsystem_highmem.core",
         "//fpga/ip/spi_dpi_master:spi_dpi_master.core",
+        "//fpga/ip/gpio_dpi:gpio_dpi.core",
         "@lowrisc_opentitan_gh//hw/dv:dpi/uartdpi/uartdpi.core",
         "@lowrisc_opentitan_gh//hw/dv:dpi/uartdpi/uartdpi_sv.core",
     ],
@@ -171,7 +230,6 @@ fusesoc_build(
     systems = ["com.google.coralnpu:fpga:chip_verilator:0.1"],
     target = "sim",
     verilator_options = ":verilator_options_highmem",
-    tags = ["manual"],
 )
 
 _PREFIX = "../../../../../../../../.."
@@ -198,6 +256,7 @@ fusesoc_build(
     ] + DDR_SRCS,
     cores = CORALNPU_SOC_CORES + [
         ":chip_nexus.core",
+        "//fpga/ip/i2c_master:i2c_master.core",
         "//fpga/ip/coralnpu_chisel_subsystem_default:coralnpu_chisel_subsystem_default.core",
     ] + DDR_CORES,
     flags = [
@@ -220,6 +279,7 @@ fusesoc_build(
     ] + DDR_SRCS,
     cores = CORALNPU_SOC_CORES + [
         ":chip_nexus.core",
+        "//fpga/ip/i2c_master:i2c_master.core",
         "//fpga/ip/coralnpu_chisel_subsystem_highmem:coralnpu_chisel_subsystem_highmem.core",
     ] + DDR_CORES,
     flags = [
@@ -237,7 +297,6 @@ filegroup(
     name = "chip_verilator_binary",
     srcs = [":build_chip_verilator"],
     output_group = "binary",
-    tags = ["manual"],
 )
 
 genrule(
@@ -245,5 +304,4 @@ genrule(
     srcs = [":chip_verilator_binary"],
     outs = ["Vchip_verilator"],
     cmd = "cp $< $@",
-    tags = ["manual"],
 )

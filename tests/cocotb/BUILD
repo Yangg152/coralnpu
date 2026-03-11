@@ -54,14 +54,6 @@ verilator_cocotb_model(
 )
 
 verilator_cocotb_model(
-    name = "core_mini_debug_axi_model",
-    trace = False,
-    cflags = VERILATOR_BUILD_ARGS,
-    hdl_toplevel = "CoreMiniDebugAxi",
-    verilog_source = "//hdl/chisel/src/coralnpu:CoreMiniDebugAxi.sv",
-)
-
-verilator_cocotb_model(
     name = "rvv_core_mini_axi_model",
     trace = False,
     cflags = VERILATOR_BUILD_ARGS,
@@ -108,7 +100,7 @@ CORE_MINI_AXI_SIM_TESTCASES = [
 
 # BEGIN_TESTCASES_FOR_rvv_core_mini_axi_sim_cocotb
 RVV_CORE_MINI_AXI_SIM_TESTCASES = [
-    ("core_mini_axi_basic_write_read_memory", "large"),
+    ("core_mini_axi_basic_write_read_memory", "enormous"),
     "core_mini_axi_run_wfi_in_all_slots",
     "core_mini_axi_slow_bready",
     ("core_mini_axi_write_read_memory_stress_test", "medium"),
@@ -185,7 +177,7 @@ template_rule(
 
 # BEGIN_TESTCASES_FOR_core_mini_axi_debug_cocotb
 CORE_MINI_AXI_DEBUG_TESTCASES = [
-    "core_mini_axi_debug_gdbserver",
+    ("core_mini_axi_debug_gdbserver", "medium"),
     "core_mini_axi_debug_dmactive",
     "core_mini_axi_debug_probe_impl",
     "core_mini_axi_debug_ndmreset",
@@ -213,8 +205,8 @@ RVV_ASSEMBLY_TESTCASES = [
     "core_mini_vmsbf_test",
     "core_mini_vmsof_test",
     "core_mini_vmsif_test",
-    ("core_mini_vill_test", "small"),
-    ("core_mini_vl_test", "small"),
+    ("core_mini_vill_test", "medium"),
+    ("core_mini_vl_test", "medium"),
     "vsetvl_test",
     "vslideup_test",
     "vslidedown_test",
@@ -225,7 +217,7 @@ RVV_ASSEMBLY_TESTCASES = [
 
 # BEGIN_TESTCASES_FOR_rvv_load_store_test
 RVV_LOAD_STORE_TESTCASES = [
-    ("load_store_bits", "small"),
+    ("load_store_bits", "medium"),
     "load_store_whole_register_test",
     "load_unit_masked",
     "load_unit_all_vtypes_test",
@@ -233,9 +225,9 @@ RVV_LOAD_STORE_TESTCASES = [
     "load8_index8",
     "load8_index8_seg",
     "load8_index16",
-    "load8_index16_seg",
+    ("load8_index16_seg", "large"),
     "load8_index32",
-    "load8_index32_seg",
+    ("load8_index32_seg", "large"),
     "load8_seg_unit",
     ("load8_stride2_m1", "small"),
     ("load8_stride2_m1_partial", "small"),
@@ -302,47 +294,61 @@ HIGHMEM_TESTCASES = [
 ]
 # END_TESTCASES_FOR_highmem_test
 
-cocotb_test_suite(
-    name = "core_mini_axi_debug_cocotb",
+COCOTB_DEBUG_TEST_BINARY_TARGETS = [
+    ":fptr.elf",
+    ":loop.elf",
+    ":math.elf",
+    ":noop.elf",
+    ":registers.elf",
+]
+
+CORE_MINI_AXI_DEBUG_COMMON_TEST_KWARGS = {
+    "deps": [
+        "//coralnpu_test_utils:core_mini_axi_sim_interface",
+        "//coralnpu_test_utils:core_mini_axi_pyocd_gdbserver",
+        "@bazel_tools//tools/python/runfiles",
+    ],
+    "waves": False,
+    "seed": "42",
+    "test_module": ["core_mini_axi_debug.py"],
+    "data": COCOTB_DEBUG_TEST_BINARY_TARGETS,
+    "default_testcase_size": "small",
+    "size": "small",
+}
+
+template_rule(
+    cocotb_test_suite,
+    {
+        "core_mini_axi_debug_cocotb": {
+            "tests_kwargs": dict(
+                CORE_MINI_AXI_DEBUG_COMMON_TEST_KWARGS,
+                hdl_toplevel = "CoreMiniAxi",
+            ),
+            "vcs_verilog_sources": ["//hdl/chisel/src/coralnpu:core_mini_axi_cc_library_verilog"],
+            "verilator_model": ":core_mini_axi_model",
+        },
+        "rvv_core_mini_axi_debug_cocotb": {
+            "tests_kwargs": dict(
+                CORE_MINI_AXI_DEBUG_COMMON_TEST_KWARGS,
+                hdl_toplevel = "RvvCoreMiniAxi",
+            ),
+            "vcs_verilog_sources": ["//hdl/chisel/src/coralnpu:rvv_core_mini_axi_cc_library_verilog"],
+            "verilator_model": ":rvv_core_mini_axi_model",
+        },
+    },
     simulators = [
         "verilator",
         "vcs",
     ],
     testcases = CORE_MINI_AXI_DEBUG_TESTCASES,
     testcases_vname = "CORE_MINI_AXI_DEBUG_TESTCASES",
-    tests_kwargs = {
-        "hdl_toplevel": "CoreMiniDebugAxi",
-       "waves": False,
-        "seed": "42",
-        "test_module": ["core_mini_axi_debug.py"],
-        "deps": [
-            "//coralnpu_test_utils:core_mini_axi_sim_interface",
-            "//coralnpu_test_utils:core_mini_axi_pyocd_gdbserver",
-            "@bazel_tools//tools/python/runfiles",
-        ],
-        "data": [
-            ":fptr.elf",
-            ":math.elf",
-            ":noop.elf",
-            ":registers.elf",
-        ],
-        "default_testcase_size": "small",
-        "size": "small",
-    },
     vcs_build_args = VCS_BUILD_ARGS,
-    vcs_data = [
-        ":fptr.elf",
-        ":math.elf",
-        ":noop.elf",
-        ":registers.elf",
-    ] + [
+    vcs_data = COCOTB_DEBUG_TEST_BINARY_TARGETS + [
         ":coverage_exclude.cfg",
-        ":xprop.cfg"
+        ":xprop.cfg",
     ],
     vcs_defines = VCS_DEFINES,
     vcs_test_args = VCS_TEST_ARGS,
-    vcs_verilog_sources = ["//hdl/chisel/src/coralnpu:core_mini_axi_debug_cc_library_verilog"],
-    verilator_model = ":core_mini_debug_axi_model",
 )
 
 cocotb_test_suite(
@@ -381,11 +387,17 @@ cocotb_test_suite(
 )
 
 coralnpu_v2_binary(
+    name = "loop",
+    srcs = [
+        "loop.S",
+    ],
+)
+
+coralnpu_v2_binary(
     name = "align_test",
     srcs = [
         "align_test.cc",
     ],
-    semihosting = True,
 )
 
 # Generate WFI targets for each slot (for elf generation)

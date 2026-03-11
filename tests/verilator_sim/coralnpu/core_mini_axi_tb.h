@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <map>
 #include <optional>
 #include <queue>
 #include <vector>
@@ -43,6 +44,7 @@
 #include "tests/test-modules/signals-axi.h"
 /* clang-format on */
 
+#include "soc/interconnect/iconnect.h"
 #include "tests/verilator_sim/util.h"
 #define MODEL_HEADER_SUFFIX .h
 #define MODEL_HEADER STRINGIFY(VERILATOR_MODEL MODEL_HEADER_SUFFIX)
@@ -56,11 +58,7 @@
 struct CoreMiniAxi_tb : Sysc_tb {
  public:
   static const char* kCoreMiniAxiModelName;
-  struct SlogIO {
-    sc_signal<bool> valid;
-    sc_signal<sc_bv<5>> addr;
-    sc_signal<sc_bv<32>> data;
-  };
+  typedef iconnect<2, 1> TlmMux;
 
   struct DebugIO {
     sc_signal<sc_bv<4>> en;
@@ -131,8 +129,16 @@ struct CoreMiniAxi_tb : Sysc_tb {
 #endif
 #if (KP_enableRvv == true)
 #define RB_DEBUG_IO_DATA_WIDTH KP_rvvVlen
+#define RB_DEBUG_IO_VEC(x, y) \
+  sc_signal<bool> rb_inst_##x##_bits_vecWrites_##y##_valid; \
+  sc_signal<sc_bv<KP_rvvVlen>> rb_inst_##x##_bits_vecWrites_##y##_bits_data; \
+  sc_signal<sc_bv<5>> rb_inst_##x##_bits_vecWrites_##y##_bits_idx;
+#define RB_DEBUG_IO_VECS_8(x) \
+  RB_DEBUG_IO_VEC(x, 0) RB_DEBUG_IO_VEC(x, 1) RB_DEBUG_IO_VEC(x, 2) RB_DEBUG_IO_VEC(x, 3) \
+  RB_DEBUG_IO_VEC(x, 4) RB_DEBUG_IO_VEC(x, 5) RB_DEBUG_IO_VEC(x, 6) RB_DEBUG_IO_VEC(x, 7)
 #else
 #define RB_DEBUG_IO_DATA_WIDTH 32
+#define RB_DEBUG_IO_VECS_8(x)
 #endif
 #define RB_DEBUG_IO(x) \
   sc_signal<bool> rb_inst_##x##_valid; \
@@ -140,9 +146,12 @@ struct CoreMiniAxi_tb : Sysc_tb {
   sc_signal<sc_bv<32>> rb_inst_##x##_bits_inst; \
   sc_signal<sc_bv<KP_retirementBufferIdxWidth>> rb_inst_##x##_bits_idx; \
   sc_signal<sc_bv<RB_DEBUG_IO_DATA_WIDTH>> rb_inst_##x##_bits_data; \
-  sc_signal<bool> rb_inst_##x##_bits_trap;
+  sc_signal<bool> rb_inst_##x##_bits_trap; \
+  RB_DEBUG_IO_VECS_8(x)
   REPEAT(RB_DEBUG_IO, KP_retirementBufferSize);
 #undef RB_DEBUG_IO
+#undef RB_DEBUG_IO_VECS_8
+#undef RB_DEBUG_IO_VEC
 #undef RB_DEBUG_IO_DATA_WIDTH
   };
 
@@ -200,6 +209,8 @@ struct CoreMiniAxi_tb : Sysc_tb {
   void EnqueueTransactionSync(std::vector<DataTransfer> transfers);
   void EnqueueTransactionAsync(std::vector<DataTransfer> transfers);
 
+  void tohost_reader_thread();
+
  protected:
   void posedge() override;
 
@@ -212,6 +223,9 @@ struct CoreMiniAxi_tb : Sysc_tb {
   tlm2axi_bridge<KP_axi2AddrBits, KP_lsuDataBits, KP_axi2IdBits, 8, 1, 0, 0, 0,
                  0, 0>
       tlm2axi_bridge_;
+  TlmMux tlm_mux_;
+  tlm_utils::simple_initiator_socket<CoreMiniAxi_tb> tohost_initiator_socket_;
+
   axi2tlm_bridge<KP_axi2AddrBits, KP_lsuDataBits, KP_axi2IdBits, 8, 1, 0, 0, 0,
                  0, 0>
       axi2tlm_bridge_;
@@ -223,7 +237,6 @@ struct CoreMiniAxi_tb : Sysc_tb {
   // NB: Used to bind bridge and checker, DUT needs manual wiring.
   CoreMiniAxiSignals tlm2axi_signals_;
   CoreMiniAxiSignals axi2tlm_signals_;
-  SlogIO slog_io_;
   DebugIO debug_io_;
   DebugModuleIO dm_io_;
   Xbar xbar_;
@@ -232,7 +245,7 @@ struct CoreMiniAxi_tb : Sysc_tb {
 
   std::unique_ptr<TrafficDesc> wrap_transfer_;
   std::unique_ptr<TrafficDesc> narrow_transfer_;
-  bool transfer_in_progress_;
+  bool transfer_in_progress_ = false;
 
   absl::Mutex transfer_queue_mtx_;
   absl::CondVar transfer_queue_cv_;
@@ -242,11 +255,21 @@ struct CoreMiniAxi_tb : Sysc_tb {
 
   static CoreMiniAxi_tb* singleton_;
   static CoreMiniAxi_tb* getSingleton() { return singleton_; }
+#ifdef HIGHMEM_RTL
+  static constexpr uint32_t csr_addr_ = 0x200000;
+#else
   static constexpr uint32_t csr_addr_ = 0x30000;
+#endif
   std::unique_ptr<VERILATOR_MODEL> core_;
 
   std::optional<uint32_t> tohost_addr_;
+  std::optional<uint32_t> tohost_ready_addr_;
   std::optional<uint32_t> fromhost_addr_;
+  std::optional<uint32_t> fromhost_ready_addr_;
+  std::map<uint64_t, int> fd_map_;
+
+  sc_event tohost_read_event_;
+  uint32_t tohost_read_addr_;
 
   bool instr_trace_ = false;
   InstructionTrace tracer_;

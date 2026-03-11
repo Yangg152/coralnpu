@@ -150,6 +150,7 @@ module rvv_backend_rob
         .N            (`NUM_RT_UOP),
         .DEPTH        (`ROB_DEPTH),
         .CHAOS_PUSH   (1'b1),
+        .ASYNC_RSTN   (1'b1),
         .FULL_PUSH    (1'b1)
     ) u_uop_info_fifo (
       // global
@@ -217,55 +218,59 @@ module rvv_backend_rob
     );
 
   // update PU result to result memory
-    always_ff @(posedge clk) begin
-        for (int k=0; k<`NUM_ALU; k++) begin
-            if (wr_valid_alu2rob[k] && wr_ready_rob2alu[k]) begin
-`ifdef TB_SUPPORT
-                res_mem[wr_alu2rob[k].rob_entry].uop_pc <= wr_alu2rob[k].uop_pc;
-`endif                
-                res_mem[wr_alu2rob[k].rob_entry].w_valid <= wr_alu2rob[k].w_valid;
-                res_mem[wr_alu2rob[k].rob_entry].w_data  <= wr_alu2rob[k].w_data;
-                res_mem[wr_alu2rob[k].rob_entry].vsaturate <= wr_alu2rob[k].vsaturate;
+    always_ff @(posedge clk, negedge rst_n) begin
+        if (!rst_n)
+          res_mem <= 'b0;
+        else begin
+            for (int k=0; k<`NUM_ALU; k++) begin
+                if (wr_valid_alu2rob[k] && wr_ready_rob2alu[k]) begin
+                  `ifdef TB_SUPPORT
+                    res_mem[wr_alu2rob[k].rob_entry].uop_pc <= wr_alu2rob[k].uop_pc;
+                  `endif                
+                    res_mem[wr_alu2rob[k].rob_entry].w_valid <= wr_alu2rob[k].w_valid;
+                    res_mem[wr_alu2rob[k].rob_entry].w_data  <= wr_alu2rob[k].w_data;
+                    res_mem[wr_alu2rob[k].rob_entry].vsaturate <= wr_alu2rob[k].vsaturate;
+                end
             end
-        end
-        for (int k=0; k<`NUM_PMTRDT; k++) begin
-            if (wr_valid_pmtrdt2rob[k] && wr_ready_rob2pmtrdt[k]) begin
-`ifdef TB_SUPPORT
-                res_mem[wr_pmtrdt2rob[k].rob_entry].uop_pc <= wr_pmtrdt2rob[k].uop_pc;
-`endif                
-                res_mem[wr_pmtrdt2rob[k].rob_entry].w_valid <= wr_pmtrdt2rob[k].w_valid;
-                res_mem[wr_pmtrdt2rob[k].rob_entry].w_data  <= wr_pmtrdt2rob[k].w_data;
-                res_mem[wr_pmtrdt2rob[k].rob_entry].vsaturate <= wr_pmtrdt2rob[k].vsaturate;
+            for (int k=0; k<`NUM_PMTRDT; k++) begin
+                if (wr_valid_pmtrdt2rob[k] && wr_ready_rob2pmtrdt[k]) begin
+                  `ifdef TB_SUPPORT
+                    res_mem[wr_pmtrdt2rob[k].rob_entry].uop_pc <= wr_pmtrdt2rob[k].uop_pc;
+                  `endif                
+                    res_mem[wr_pmtrdt2rob[k].rob_entry].w_valid <= wr_pmtrdt2rob[k].w_valid;
+                    res_mem[wr_pmtrdt2rob[k].rob_entry].w_data  <= wr_pmtrdt2rob[k].w_data;
+                    res_mem[wr_pmtrdt2rob[k].rob_entry].vsaturate <= wr_pmtrdt2rob[k].vsaturate;
+                end
             end
-        end
-        for (int k=0; k<`NUM_MUL; k++) begin
-            if (wr_valid_mul2rob[k] && wr_ready_rob2mul[k]) begin
-`ifdef TB_SUPPORT
-                res_mem[wr_mul2rob[k].rob_entry].uop_pc  <= wr_mul2rob[k].uop_pc;
-`endif                
-                res_mem[wr_mul2rob[k].rob_entry].w_valid <= wr_mul2rob[k].w_valid;
-                res_mem[wr_mul2rob[k].rob_entry].w_data  <= wr_mul2rob[k].w_data;
-                res_mem[wr_mul2rob[k].rob_entry].vsaturate <= wr_mul2rob[k].vsaturate;
+            for (int k=0; k<`NUM_MUL; k++) begin
+                if (wr_valid_mul2rob[k] && wr_ready_rob2mul[k]) begin
+                  `ifdef TB_SUPPORT
+                    res_mem[wr_mul2rob[k].rob_entry].uop_pc  <= wr_mul2rob[k].uop_pc;
+                  `endif                
+                    res_mem[wr_mul2rob[k].rob_entry].w_valid <= wr_mul2rob[k].w_valid;
+                    res_mem[wr_mul2rob[k].rob_entry].w_data  <= wr_mul2rob[k].w_data;
+                    res_mem[wr_mul2rob[k].rob_entry].vsaturate <= wr_mul2rob[k].vsaturate;
+                end
             end
-        end
-        for (int k=0; k<`NUM_DIV; k++) begin
-            if (wr_valid_div2rob[k] && wr_ready_rob2div[k]) begin
-`ifdef TB_SUPPORT
-                res_mem[wr_div2rob[k].rob_entry].uop_pc  <= wr_div2rob[k].uop_pc;
-`endif                
-                res_mem[wr_div2rob[k].rob_entry].w_valid <= wr_div2rob[k].w_valid;
-                res_mem[wr_div2rob[k].rob_entry].w_data  <= wr_div2rob[k].w_data;
-                res_mem[wr_div2rob[k].rob_entry].vsaturate <= wr_div2rob[k].vsaturate;
+            for (int k=0; k<`NUM_DIV; k++) begin
+                if (wr_valid_div2rob[k] && wr_ready_rob2div[k]) begin
+                  `ifdef TB_SUPPORT
+                    res_mem[wr_div2rob[k].rob_entry].uop_pc  <= wr_div2rob[k].uop_pc;
+                  `endif                
+                    res_mem[wr_div2rob[k].rob_entry].w_valid <= wr_div2rob[k].w_valid;
+                    res_mem[wr_div2rob[k].rob_entry].w_data  <= wr_div2rob[k].w_data;
+                    res_mem[wr_div2rob[k].rob_entry].vsaturate <= wr_div2rob[k].vsaturate;
+                end
             end
-        end
-        for (int k=0; k<`NUM_LSU; k++) begin
-            if (wr_valid_lsu2rob[k] && wr_ready_rob2lsu[k]) begin
-`ifdef TB_SUPPORT
-                res_mem[wr_lsu2rob[k].rob_entry].uop_pc  <= wr_lsu2rob[k].uop_pc;
-`endif                
-                res_mem[wr_lsu2rob[k].rob_entry].w_valid <= wr_lsu2rob[k].w_valid;
-                res_mem[wr_lsu2rob[k].rob_entry].w_data  <= wr_lsu2rob[k].w_data;
-                res_mem[wr_lsu2rob[k].rob_entry].vsaturate <= wr_lsu2rob[k].vsaturate;
+            for (int k=0; k<`NUM_LSU; k++) begin
+                if (wr_valid_lsu2rob[k] && wr_ready_rob2lsu[k]) begin
+                  `ifdef TB_SUPPORT
+                    res_mem[wr_lsu2rob[k].rob_entry].uop_pc  <= wr_lsu2rob[k].uop_pc;
+                  `endif                
+                    res_mem[wr_lsu2rob[k].rob_entry].w_valid <= wr_lsu2rob[k].w_valid;
+                    res_mem[wr_lsu2rob[k].rob_entry].w_data  <= wr_lsu2rob[k].w_data;
+                    res_mem[wr_lsu2rob[k].rob_entry].vsaturate <= wr_lsu2rob[k].vsaturate;
+                end
             end
         end
         // [新增] MXU Result Update Logic

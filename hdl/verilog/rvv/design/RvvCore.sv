@@ -94,7 +94,11 @@ module RvvCore #(parameter N = 4,
 
   // Trap output
   output logic trap_valid_o,
-  output RVVInstruction trap_data_o
+  output RVVInstruction trap_data_o,
+
+  // VXSAT update from backend (fixes C3 bug: previously dead-end wires)
+  output logic                            wr_vxsat_valid_o,
+  output logic    [`VCSR_VXSAT_WIDTH-1:0] wr_vxsat_o
 );
   logic [N-1:0] frontend_cmd_valid;
   RVVCmd [N-1:0] frontend_cmd_data;
@@ -156,10 +160,6 @@ module RvvCore #(parameter N = 4,
   // LSU feedback to RVV
     UOP_LSU2RVV_t     [`NUM_LSU-1:0]          uop_lsu_lsu2rvv;
     always_comb begin
-      `ifdef TB_SUPPORT
-            uop_lsu_lsu2rvv[i].uop_pc = 0;
-            uop_lsu_lsu2rvv[i].uop_index = 0;
-      `endif
       for (int i = 0; i < `NUM_LSU; i++) begin
         // TODO(derekjchow): Modify me
         uop_lsu_lsu2rvv[i].vregfile_write_valid = (
@@ -168,6 +168,10 @@ module RvvCore #(parameter N = 4,
         uop_lsu_lsu2rvv[i].vregfile_write_data = uop_lsu_wdata_lsu2rvv[i];
         uop_lsu_lsu2rvv[i].lsu_vstore_last = (
             uop_lsu_valid_lsu2rvv[i] && uop_lsu_last_lsu2rvv[i]);
+      `ifdef TB_SUPPORT
+        uop_lsu_lsu2rvv[i].uop_pc = 0;
+        uop_lsu_lsu2rvv[i].uop_index = 0;
+      `endif
       end
     end
 
@@ -243,8 +247,15 @@ module RvvCore #(parameter N = 4,
       .vcsr_valid(vcsr_valid),
       .vector_csr(vector_csr),
       .vcsr_ready(vcsr_ready),
+`ifdef TB_SUPPORT
+      .rd_valid_rob2rt_o(),
+`endif
       .rvv_idle(rvv_backend_idle),
       .rd_rob2rt_o(rd_rob2rt)
   );
+
+  // Connect vxsat signals to outputs (fixes C3 bug)
+  assign wr_vxsat_valid_o = wr_vxsat_valid;
+  assign wr_vxsat_o = wr_vxsat;
 
 endmodule

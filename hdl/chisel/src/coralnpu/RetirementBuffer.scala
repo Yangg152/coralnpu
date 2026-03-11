@@ -20,6 +20,10 @@ import common._
 
 class RetirementBufferIO(p: Parameters) extends Bundle {
   val inst = Input(Vec(p.instructionLanes, Decoupled(new FetchInstruction(p))))
+  val targets = Input(Vec(p.instructionLanes, UInt(32.W)))
+  val jalrTargets = Input(Vec(p.instructionLanes, UInt(32.W)))
+  val jump = Input(Vec(p.instructionLanes, Bool()))
+  val branch = Input(Vec(p.instructionLanes, Bool()))
   val storeComplete = Input(Valid(UInt(32.W)))
   val writeAddrScalar = Input(Vec(p.instructionLanes, new RegfileWriteAddrIO))
   val writeDataScalar = Input(Vec(p.instructionLanes + 2, Valid(new RegfileWriteDataIO)))
@@ -35,6 +39,16 @@ class RetirementBufferIO(p: Parameters) extends Bundle {
   val debug = Output(new RetirementBufferDebugIO(p))
 }
 
+/**
+ * The Retirement Buffer manages the lifecycle of instructions from dispatch to retirement.
+ *
+ * Instruction Lifecycle:
+ * - Dispatched: The instruction is enqueued into the buffer upon dispatch.
+ * - Completed: All side effects (register writes, store completions, or faults) are committed
+ *   to the architectural state.
+ * - Retired: The final state. Instructions are dequeued from the buffer in-order when they
+ *   and all preceding instructions are completed.
+ */
 class RetirementBuffer(p: Parameters, mini: Boolean = false) extends Module {
   val io = IO(new RetirementBufferIO(p))
   val idxWidth = p.retirementBufferIdxWidth
@@ -45,6 +59,13 @@ class RetirementBuffer(p: Parameters, mini: Boolean = false) extends Module {
     val inst = if (mini) UInt(0.W) else UInt(32.W) // Instruction bits
     val idx = UInt(idxWidth.W) // Register Index
     val trap = Bool() // Instruction causing a trap to occur.
+    val isControlFlow = Bool() // True if instruction is a jump or branch.
+    val isBranch = Bool()
+    val isVector = Bool()
+    // Target storage removed in favor of linkOk check for area optimization
+    val linkOk = Bool()
+    val isEcall = Bool()
+    val isMpause = Bool()
   }
 
   val storeComplete = Pipe(io.storeComplete)
@@ -67,50 +88,121 @@ class RetirementBuffer(p: Parameters, mini: Boolean = false) extends Module {
   // Valid fault, no fire, also not a load/store: those faults should be handled purely in the update stage
   val noFire0Fault = (io.fault.valid && !io.inst(0).fire && (io.fault.bits.mcause =/= 7.U) && (io.fault.bits.mcause =/= 5.U))
   val faultPc = io.fault.bits.mepc
+
+  // Mini-mode optimization state: Track the expected PC of the next instruction across dispatch cycles.
+  // These are used to verify control flow continuity (linkOk) for the first instruction of a dispatch group.
+  // If the fetcher sends an instruction that doesn't match the expected target (e.g. due to mis-prediction
+  // in the fetcher), linkOk will be false, eventually triggering a trap.
+  val regLastTarget = RegInit(0.U(32.W))
+  val regLastAddr = RegInit(0.U(32.W))
+  val regLastIsBranch = RegInit(false.B)
+
   // Create Instruction wires out of io.inst + io.writeAddrScalar, and align.
-  def WireInstruction(i: Int) = {
-    val floatValid = (i == 0).B && io.writeAddrFloat.map(x => x.valid).getOrElse(false.B)
-    val floatAddr = io.writeAddrFloat.map(x => x.addr).getOrElse(0.U)
+  def dispatch(
+      finst: FetchInstruction,
+      scalarAddr: RegfileWriteAddrIO,
+      floatAddr: Option[RegfileWriteAddrIO],
+      vectorAddr: Option[RegfileWriteAddrIO],
+      isJump: Bool,
+      isBranch: Bool,
+      linkOk: Bool,
+      isFault: Bool): Instruction = {
+    val floatValid = floatAddr.map(_.valid).getOrElse(false.B)
+    val fAddr = floatAddr.map(_.addr).getOrElse(0.U)
 
-    val scalarValid = io.writeAddrScalar(i).valid
-    val scalarAddr = io.writeAddrScalar(i).addr
+    val sValid = scalarAddr.valid
+    val sAddr = scalarAddr.addr
 
-    val vectorValid = io.writeAddrVector.map(x => x(i).valid).getOrElse(false.B)
-    val vectorAddr = io.writeAddrVector.map(x => x(i).addr).getOrElse(0.U)
-
-    // clean this up... either a decode+pc match, or fault w/ no fires.
-    val noFireFault = ((i == 0).B && noFire0Fault)
-    val faultingInstr = (decodeFaultValid && ((faultPc === io.inst(i).bits.addr)))
+    val vectorValid = vectorAddr.map(_.valid).getOrElse(false.B)
+    val vAddr = vectorAddr.map(_.addr).getOrElse(0.U)
 
     // Store detection per RISC-V spec section 7.3 Table 11
     // Scalar store: opcode 0x23
-    val scalarStore = (io.inst(i).bits.inst(6,0) === "b0100011".U)
-    val width = io.inst(i).bits.inst(14,12)
+    val scalarStore = (finst.inst(6,0) === "b0100011".U)
+    val width = finst.inst(14,12)
     // Float store: opcode 0x27 with width ∈ {001, 010, 011, 100}
     // These are 16b, 32b, 64b, 128b FP stores
-    val floatStore = (io.inst(i).bits.inst(6,0) === "b0100111".U) &&
+    val floatStore = (finst.inst(6,0) === "b0100111".U) &&
                      (width === "b001".U || width === "b010".U ||
                       width === "b011".U || width === "b100".U)
     // Vector store: opcode 0x27 with width ∈ {000, 101, 110, 111}
     // These are 8b, 16b, 32b, 64b element vector stores
-    val vectorStore = (io.inst(i).bits.inst(6,0) === "b0100111".U) &&
+    val vectorStore = (finst.inst(6,0) === "b0100111".U) &&
                       (width === "b000".U || width === "b101".U ||
                        width === "b110".U || width === "b111".U)
     val store = scalarStore || floatStore || vectorStore
 
     val instr = Wire(new Instruction)
-    instr.addr := Mux(noFireFault, io.fault.bits.mepc, io.inst(i).bits.addr)
-    instr.inst := Mux(noFireFault && !mini.B, io.fault.bits.mtval, io.inst(i).bits.inst)
+    instr.addr := finst.addr
+    instr.inst := finst.inst
     instr.idx := MuxCase(noWriteRegIdx, Seq(
-      floatValid -> (floatAddr +& p.floatRegfileBaseAddr.U),
-      (scalarValid && scalarAddr =/= 0.U) -> scalarAddr,
-      (vectorValid) -> (vectorAddr +& p.rvvRegfileBaseAddr.U),
+      floatValid -> (fAddr +& p.floatRegfileBaseAddr.U),
+      (vectorValid) -> (vAddr +& p.rvvRegfileBaseAddr.U),
+      (sValid && sAddr =/= 0.U) -> sAddr,
       store -> storeRegIdx,
     ))
-    instr.trap := faultingInstr || noFireFault
+    instr.trap := isFault
+    instr.isControlFlow := isJump || isBranch
+    instr.isBranch := isBranch
+    instr.isVector := vectorValid || vectorStore
+    instr.linkOk := linkOk
+    instr.isEcall := (finst.inst === 0x73.U)
+    instr.isMpause := (finst.inst === 0x08000073.U)
     instr
   }
-  val insts = (0 until p.instructionLanes).map(x => WireInstruction(x))
+
+  def fault(
+      finst: FetchInstruction,
+      scalarAddr: RegfileWriteAddrIO,
+      floatAddr: Option[RegfileWriteAddrIO],
+      vectorAddr: Option[RegfileWriteAddrIO],
+      isJump: Bool,
+      isBranch: Bool): Instruction = {
+    // A faulting instruction still needs properties like isControlFlow and idx
+    // to correctly handle side effects (like JAL return addresses) and debug reporting.
+    val instr = dispatch(finst, scalarAddr, floatAddr, vectorAddr, isJump, isBranch,
+                         linkOk = true.B, isFault = true.B)
+    instr.addr := io.fault.bits.mepc
+    // mtval only contains instruction bits for illegal instruction faults (mcause == 2).
+    // For other faults (like misaligned address), it contains addresses.
+    instr.inst := Mux(!mini.B && io.fault.bits.mcause === 2.U, io.fault.bits.mtval, finst.inst)
+    // Re-calculate linkOk for the fault PC against the last retired instruction's target.
+    instr.linkOk := (instr.addr === regLastTarget) || (regLastIsBranch && instr.addr === regLastAddr + 4.U)
+    instr
+  }
+
+  val insts = (0 until p.instructionLanes).map(i => {
+    val isDecodeFault = decodeFaultValid && (faultPc === io.inst(i).bits.addr)
+    val isNoFireFault = (i == 0).B && noFire0Fault
+
+    val linkOk = if (i == 0) {
+        (io.inst(0).bits.addr === regLastTarget) || (regLastIsBranch && io.inst(0).bits.addr === regLastAddr + 4.U)
+    } else {
+        val prevIsJalr = (io.inst(i-1).bits.inst(6,0) === "b1100111".U)
+        val prevTarget = Mux(prevIsJalr, io.jalrTargets(i-1), io.targets(i-1))
+        val prevIsBranch = io.branch(i-1)
+        (io.inst(i).bits.addr === prevTarget) || (prevIsBranch && io.inst(i).bits.addr === io.inst(i-1).bits.addr + 4.U)
+    }
+
+    val fAddr = io.writeAddrFloat.filter(_ => i == 0)
+    val vAddr = io.writeAddrVector.map(_(i))
+    Mux(isNoFireFault,
+        fault(io.inst(i).bits, io.writeAddrScalar(i), fAddr, vAddr, io.jump(i), io.branch(i)),
+        dispatch(io.inst(i).bits, io.writeAddrScalar(i), fAddr, vAddr, io.jump(i), io.branch(i), linkOk, isDecodeFault))
+  })
+
+  // Update regLast state based on the last fired instruction
+  val hasFire = instFires.reduce(_|_)
+  val targetsList = (0 until p.instructionLanes).map(i => {
+       val isJalr = (io.inst(i).bits.inst(6,0) === "b1100111".U)
+       Mux(isJalr, io.jalrTargets(i), io.targets(i))
+  })
+  val addrList = io.inst.map(_.bits.addr)
+  val branchList = io.branch
+
+  regLastTarget := Mux(hasFire, PriorityMux(instFires.reverse, targetsList.reverse), regLastTarget)
+  regLastAddr := Mux(hasFire, PriorityMux(instFires.reverse, addrList.reverse), regLastAddr)
+  regLastIsBranch := Mux(hasFire, PriorityMux(instFires.reverse, branchList.reverse), regLastIsBranch)
 
   val instsWithWriteFired = PopCount(io.inst.map(_.fire))
   instBuffer.io.enqValid := instsWithWriteFired +& (decodeFaultValid || noFire0Fault)
@@ -126,12 +218,37 @@ class RetirementBuffer(p: Parameters, mini: Boolean = false) extends Module {
   class InstructionUpdate extends Bundle {
     val result = if (mini) UInt(0.W) else UInt(dataWidth.W)
     val trap = Bool()
+    val cfDone = Bool()
   }
+
+  class VectorWrite extends Bundle {
+    val data = UInt(p.rvvVlen.W)
+    val idx = UInt(5.W)
+  }
+
   // Maintain a re-order buffer of instruction completion result.
   // The order and alignment of these buffers should correspond to the
   // output of `instBuffer`.
   val dataWidth = if (mini) 0 else (if (p.enableRvv) p.lsuDataBits else 32)
   val resultBuffer = RegInit(VecInit(Seq.fill(bufferSize)(MakeInvalid(new InstructionUpdate))))
+
+  val accEnqPtr = RegInit(0.U(log2Ceil(bufferSize).W))
+  val accDeqPtr = RegInit(0.U(log2Ceil(bufferSize).W))
+  val vectorWriteAccumulator = Option.when(!mini && p.enableRvv)(
+    RegInit(VecInit.fill(bufferSize)(VecInit.fill(8)(0.U.asTypeOf(Valid(new VectorWrite)))))
+  )
+
+  val vectorAccumulatorNext = Option.when(!mini && p.enableRvv)(
+    Wire(Vec(bufferSize, Vec(8, Valid(new VectorWrite))))
+  )
+  val debugVectorWrites = Option.when(!mini && p.enableRvv)(
+    Wire(Vec(bufferSize, Vec(8, Valid(new VectorWrite))))
+  )
+  if (!mini && p.enableRvv) {
+      vectorAccumulatorNext.get := vectorWriteAccumulator.get
+      debugVectorWrites.get := vectorWriteAccumulator.get
+  }
+
   // Compute update based on register writeback.
   // Note: The shift when committing instructions will be handled in a later block.
   val resultUpdate = Wire(Vec(bufferSize, Valid(new InstructionUpdate)))
@@ -145,30 +262,123 @@ class RetirementBuffer(p: Parameters, mini: Boolean = false) extends Module {
         x => x.valid && ((x.bits.addr +& p.floatRegfileBaseAddr.U) ===
             bufferEntry.idx))).getOrElse(Seq(false.B))
     val vectorWriteIdxMap = io.writeDataVector.map(y => y.map(
-        x => x.valid && ((x.bits.addr +& p.rvvRegfileBaseAddr.U) ===
-            bufferEntry.idx))).getOrElse(Seq(false.B))
+        x => x.valid && (
+            (bufferEntry.isVector && (x.bits.uop_pc === bufferEntry.addr)) ||
+            (!bufferEntry.isVector && ((x.bits.addr +& p.rvvRegfileBaseAddr.U) === bufferEntry.idx))
+        )
+    )).getOrElse(Seq(false.B))
     // Check if this entry is an operation that doesn't require a register write, but is not a store.
     val nonWritingInstr = bufferEntry.idx === noWriteRegIdx
     val storeInstr = bufferEntry.idx === storeRegIdx
     // Check if this entry is the faulting instruction
     val faultingInstr = io.fault.valid && (bufferEntry.addr === faultPc)
-    // The entry is active if it's validly enqueued and not already complete.
-    val validBufferEntry = (i.U < instBuffer.io.nEnqueued) && (!resultBuffer(i).valid)
+    // The entry is active if it's validly enqueued.
+    val validBufferEntry = (i.U < instBuffer.io.nEnqueued)
 
     // Find the index of the first write port that provides the needed data.
     val scalarWriteIdx = PriorityEncoder(scalarWriteIdxMap)
     val floatWriteIdx = PriorityEncoder(floatWriteIdxMap)
     val vectorWriteIdx = PriorityEncoder(vectorWriteIdxMap)
 
+    val vectorReady = io.writeDataVector.map(y => y.zip(vectorWriteIdxMap).map({ case (port, matchBool) =>
+        matchBool && port.bits.last_uop_valid
+    }).reduce(_|_)).getOrElse(false.B)
+
+    if (!mini && p.enableRvv) {
+       val pIdx = accDeqPtr + i.U
+
+       val nextEntry = Wire(Vec(8, Valid(new VectorWrite)))
+
+       val portMatches = Wire(Vec(p.instructionLanes, Bool()))
+       val portTargets = Wire(Vec(p.instructionLanes, UInt(3.W)))
+
+       for (j <- 0 until p.instructionLanes) {
+           val port = io.writeDataVector.get(j)
+           portMatches(j) := vectorWriteIdxMap(j)
+           val absAddr = port.bits.addr +& p.rvvRegfileBaseAddr.U
+           val offset = absAddr - bufferEntry.idx
+           portTargets(j) := offset(2,0)
+       }
+
+       for (k <- 0 until 8) {
+           val hits = Wire(Vec(p.instructionLanes, Bool()))
+           val datas = Wire(Vec(p.instructionLanes, UInt(p.rvvVlen.W)))
+           val idxs = Wire(Vec(p.instructionLanes, UInt(5.W)))
+
+           for (j <- 0 until p.instructionLanes) {
+               val port = io.writeDataVector.get(j)
+               hits(j) := portMatches(j) && (portTargets(j) === k.U)
+               datas(j) := port.bits.data
+               idxs(j) := port.bits.addr
+           }
+
+           val anyHit = hits.asUInt.orR
+           nextEntry(k).valid := Mux(anyHit, true.B, vectorWriteAccumulator.get(pIdx)(k).valid)
+           nextEntry(k).bits.data := Mux(anyHit, PriorityMux(hits, datas), vectorWriteAccumulator.get(pIdx)(k).bits.data)
+           nextEntry(k).bits.idx := Mux(anyHit, PriorityMux(hits, idxs), vectorWriteAccumulator.get(pIdx)(k).bits.idx)
+       }
+       vectorAccumulatorNext.get(pIdx) := Mux(validBufferEntry, nextEntry, vectorWriteAccumulator.get(pIdx))
+       debugVectorWrites.get(pIdx) := Mux(validBufferEntry, nextEntry, vectorWriteAccumulator.get(pIdx))
+    }
+
     // If the entry is active and its data dependency is met (or it has no dependency)...
     // Special care here for vector, as multiple instructions are allowed to be dispatched for the same destination register.
     // This differs from how the scalar/float scoreboards restrict dispatch.
-    val updated = (validBufferEntry &&
-        (scalarWriteIdxMap.reduce(_|_) || floatWriteIdxMap.reduce(_|_) || vectorWriteIdxMap.reduce(_|_) || nonWritingInstr || faultingInstr || (storeInstr && storeComplete.valid && storeComplete.bits === bufferEntry.addr) || bufferEntry.trap))
+    val dataReady = (scalarWriteIdxMap.reduce(_|_) || floatWriteIdxMap.reduce(_|_) || vectorReady || nonWritingInstr || (storeInstr && storeComplete.valid && storeComplete.bits === bufferEntry.addr))
+    val isControlFlow = bufferEntry.isControlFlow
+    val isBranch = bufferEntry.isBranch
+    // For the last entry in the buffer, we can't see the next instruction yet (it hasn't been enqueued or wrapped visibly).
+    // So we treat nextValid as false.
+    val nextValid = if (i < bufferSize - 1) ((i.U +& 1.U) < instBuffer.io.nEnqueued) else false.B
+    val nextAddr = if (i < bufferSize - 1) instBuffer.io.dataOut(i + 1).addr else 0.U
+    val nextAddrValid = nextValid || noFire0Fault || io.inst(0).valid
+
+    val lane0LinkOk = (io.inst(0).bits.addr === regLastTarget) || (regLastIsBranch && io.inst(0).bits.addr === regLastAddr + 4.U)
+    val faultLinkOk = (io.fault.bits.mepc === regLastTarget) || (regLastIsBranch && io.fault.bits.mepc === regLastAddr + 4.U)
+    val fallthrough = bufferEntry.addr + 4.U
+
+    // Check next instruction's linkOk bit to verify control flow continuity.
+    // If we are at the end of the buffer (i == bufferSize-1), we check the incoming instruction (lane 0) or fault.
+    // Note: We use a Scala conditional to prevent generating hardware for out-of-bounds access.
+    val nextLinkOk = if (i < bufferSize - 1) instBuffer.io.dataOut(i + 1).linkOk else true.B
+
+    val targetMatch = MuxCase(true.B, Seq(
+        (nextValid && (i.U < (bufferSize - 1).U)) -> nextLinkOk,
+        noFire0Fault -> faultLinkOk,
+        io.inst(0).valid -> lane0LinkOk
+    ))
+    val fallthroughMatch = (MuxCase(nextAddr, Seq(
+                          nextValid -> nextAddr,
+                          noFire0Fault -> io.fault.bits.mepc,
+                          io.inst(0).valid -> io.inst(0).bits.addr
+                      )) === fallthrough)
+
+    val cfMatch = nextAddrValid && (targetMatch || (isBranch && fallthroughMatch))
+    // CF instructions wait for the next instruction to be valid.
+    // They are ready if matched, or if they mismatch (which leads to trap).
+    val cfReady = !isControlFlow || nextAddrValid
+
+    // Update state:
+    // We update valid (Data Done) if previously done, or if new data arrives.
+    // We update cfDone if previously done, or if new CF check passes.
+    val prevDataDone = resultBuffer(i).valid
+    val prevCfDone = resultBuffer(i).valid && resultBuffer(i).bits.cfDone
+
+    // Only allow new data/cf updates if the entry is actually valid in instBuffer
+    val newCfDone = validBufferEntry && cfReady
+    val isMpause = bufferEntry.isMpause
+    val currentTrap = resultBuffer(i).bits.trap || faultingInstr || (validBufferEntry && bufferEntry.trap) || (validBufferEntry && isControlFlow && newCfDone && (!cfMatch || noFire0Fault) && !isMpause)
+
+    val newDataDone = validBufferEntry && !prevDataDone && (dataReady || currentTrap)
+
+    val currentDataDone = prevDataDone || newDataDone
+    val currentCfDone = prevCfDone || newCfDone
 
     // If updated, mark this buffer entry as complete for the next cycle.
-    resultUpdate(i).valid := Mux(updated, true.B, resultBuffer(i).valid) // true.B
+    resultUpdate(i).valid := currentDataDone
+    resultUpdate(i).bits.cfDone := currentCfDone
     resultUpdate(i).bits.result := 0.U
+    resultUpdate(i).bits.trap := currentTrap
 
     if (!mini) {
       // Select the actual data from the winning write port.
@@ -179,19 +389,24 @@ class RetirementBuffer(p: Parameters, mini: Boolean = false) extends Module {
       // Select the correct write-back data to store, if updated (FP has priority).
       val sdata = if (p.enableRvv) Cat(0.U((p.lsuDataBits - 32).W), writeDataScalar) else writeDataScalar
       val fdata = if (p.enableRvv) Cat(0.U((p.lsuDataBits - 32).W), writeDataFloat) else writeDataFloat
-      resultUpdate(i).bits.result := Mux(updated, MuxCase(0.U, Seq(
+
+      // If we are trapping, we shouldn't be writing back.
+      // This masks the writeback data in the trace.
+      val result = Mux(newDataDone, MuxCase(0.U, Seq(
         floatWriteIdxMap.reduce(_|_) -> fdata,
         vectorWriteIdxMap.reduce(_|_) -> writeDataVector,
         scalarWriteIdxMap.reduce(_|_) -> sdata,
       )), resultBuffer(i).bits.result)
+
+      val allowWritebackTrap = validBufferEntry && isControlFlow && newCfDone && noFire0Fault
+      resultUpdate(i).bits.result := Mux(currentTrap && !allowWritebackTrap, 0.U, result)
     }
-    resultUpdate(i).bits.trap := resultBuffer(i).bits.trap || faultingInstr || (i.U < instBuffer.io.nEnqueued && instBuffer.io.dataOut(i).trap)
   }
 
   val hasTrap = resultUpdate.map(x => x.valid && x.bits.trap).reduce(_||_)
   val trapDetected = VecInit(resultUpdate.map(x => x.valid && x.bits.trap))
   val firstTrapIdx = PriorityEncoder(trapDetected)
-  val countValid = Cto(VecInit(resultUpdate.map(_.valid)).asUInt)
+  val countValid = Cto(VecInit(resultUpdate.map(x => x.valid && x.bits.cfDone)).asUInt)
 
   val limit = firstTrapIdx + 1.U
   val trapReadyToRetire = hasTrap && (limit <= countValid)
@@ -202,19 +417,38 @@ class RetirementBuffer(p: Parameters, mini: Boolean = false) extends Module {
   val trapRetired = trapReadyToRetire
   instBuffer.io.flush := trapRetired
 
+  if (!mini && p.enableRvv) {
+     accEnqPtr := Mux(trapRetired, 0.U, accEnqPtr + instBuffer.io.enqValid)
+     accDeqPtr := Mux(trapRetired, 0.U, accDeqPtr + deqReady)
+
+     for (x <- 0 until bufferSize) {
+         val isEnqueuing = (0 until p.instructionLanes).map(k => (k.U < instBuffer.io.enqValid) && (x.U === accEnqPtr + k.U)).reduce(_||_)
+         vectorWriteAccumulator.get(x) := Mux(trapRetired || isEnqueuing, 0.U.asTypeOf(vectorWriteAccumulator.get(0)), vectorAccumulatorNext.get(x))
+     }
+  }
+
   resultBuffer := Mux(trapRetired,
                       VecInit(Seq.fill(bufferSize)(MakeInvalid(new InstructionUpdate))),
                       ShiftVectorRight(resultUpdate, deqReady))
-  io.nRetired := deqReady
+
+  val retiredEcalls = PopCount(VecInit((0 until bufferSize).map(i => (i.U < deqReady) && instBuffer.io.dataOut(i).isEcall)).asUInt)
+  io.nRetired := deqReady - retiredEcalls
   io.trapPending := RegNext(hasTrap && !trapRetired, false.B)
 
   for (i <- 0 until bufferSize) {
     val valid = (i.U < instBuffer.io.deqReady)
+    val allowDebug = resultUpdate(i).bits.trap && instBuffer.io.dataOut(i).isControlFlow && noFire0Fault
     io.debug.inst(i).valid := valid
     io.debug.inst(i).bits.pc := MuxOR(valid, instBuffer.io.dataOut(i).addr)
     io.debug.inst(i).bits.inst := MuxOR(valid && !mini.B, instBuffer.io.dataOut(i).inst)
     io.debug.inst(i).bits.data := MuxOR(valid && !mini.B, resultUpdate(i).bits.result)
-    io.debug.inst(i).bits.idx := MuxOR(valid, instBuffer.io.dataOut(i).idx)
-    io.debug.inst(i).bits.trap := MuxOR(valid, resultUpdate(i).bits.trap || instBuffer.io.dataOut(i).trap)
+    io.debug.inst(i).bits.idx := MuxOR(valid, Mux(resultUpdate(i).bits.trap && !allowDebug, noWriteRegIdx, instBuffer.io.dataOut(i).idx))
+    io.debug.inst(i).bits.trap := MuxOR(valid, resultUpdate(i).bits.trap)
+    if (!mini && p.enableRvv) {
+      val pIdx = accDeqPtr + i.U
+      io.debug.inst(i).bits.vecWrites.get := debugVectorWrites.get(pIdx)
+    } else if (p.enableRvv) {
+      io.debug.inst(i).bits.vecWrites.get := 0.U.asTypeOf(io.debug.inst(i).bits.vecWrites.get)
+    }
   }
 }

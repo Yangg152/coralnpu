@@ -58,8 +58,8 @@ class coralnpu_rvvi_decode_transaction extends uvm_sequence_item;
     `uvm_field_int (war_hazard_hit, UVM_DEFAULT)
   `uvm_object_utils_end
 
-  function new (string name = "coralnpu_rvvi_decode_transaction");
+  function new(string name = "coralnpu_rvvi_decode_transaction");
     super.new(name);
-  endfunction : new
+  endfunction:new
 
-endclass : coralnpu_rvvi_decode_transaction
+endclass:coralnpu_rvvi_decode_transaction

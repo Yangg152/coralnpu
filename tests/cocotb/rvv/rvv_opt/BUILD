@@ -32,6 +32,10 @@ template_rule(
             "srcs": ["memcpy_test.cc"],
             "hdrs": ["//sw/opt:rvv_opt.h"]
         },
+        "rvv_memset_test": {
+            "srcs": ["memset_test.cc"],
+            "hdrs": ["//sw/opt:rvv_opt.h"]
+        },
     },
 )
 
@@ -39,11 +43,13 @@ filegroup(
     name = "rvv_opt_tests",
     srcs = [
         ":rvv_memcpy_test.elf",
+        ":rvv_memset_test.elf",
     ],
 )
 
 RUN_RVV_OPT_TESTS = [
     "rvv_memcpy_test",
+    "rvv_memset_test",
 ]
 
 cocotb_test_suite(
@@ -64,11 +70,17 @@ cocotb_test_suite(
             "//coralnpu_test_utils:sim_test_fixture",
             "@rules_python//python/runfiles",
         ],
-        "data": [":rvv_memcpy_test"],
+        "data": [
+            ":rvv_memcpy_test",
+            ":rvv_memset_test",
+        ],
         "size": "medium",
     },
     vcs_build_args = VCS_BUILD_ARGS,
-    vcs_data = [":rvv_memcpy_test.elf"] + [
+    vcs_data = [
+        ":rvv_memcpy_test.elf",
+        ":rvv_memset_test.elf",
+    ] + [
         "//tests/cocotb:coverage_exclude.cfg",
     ],
     vcs_defines = VCS_DEFINES,

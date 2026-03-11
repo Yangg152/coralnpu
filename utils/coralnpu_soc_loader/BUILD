@@ -26,6 +26,7 @@ py_library(
 py_binary(
     name = "loader",
     srcs = ["loader.py"],
+    imports = ["."],
     deps = [
         ":spi_driver",
         "//coralnpu_test_utils:spi_constants",
@@ -37,6 +38,20 @@ py_binary(
 py_binary(
     name = "run_simulation",
     srcs = ["run_simulation.py"],
+    data = [
+        ":loader",
+        "//fpga:copy_chip_verilator_binary",
+    ],
+    tags = ["manual"],
+    deps = [
+        "@bazel_tools//tools/python/runfiles",
+    ],
+)
+
+# Test runner for automated SoC simulation tests.
+py_binary(
+    name = "sim_test_runner",
+    srcs = ["sim_test_runner.py"],
     data = [
         ":loader",
         "//fpga:copy_chip_verilator_binary",

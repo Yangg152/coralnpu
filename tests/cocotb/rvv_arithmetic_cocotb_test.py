@@ -618,6 +618,43 @@ async def vnclip_test(dut):
 
 
 @cocotb.test()
+async def vnclip_vxsat_test(dut):
+    """Test that vxsat CSR is set after a saturating vnclip operation.
+
+    Per RISC-V Vector Extension v1.0 Section 3.5, when a saturating fixed-point
+    operation causes overflow, the vxsat CSR bit must be set to 1.
+
+    This test verifies the vxsat update path by:
+    1. Clearing vxsat to 0
+    2. Executing vnclip with MAX_INT32 >> 0, which saturates to MAX_INT16
+    3. Reading vxsat via csrr and verifying it equals 1
+
+    BUG: Currently fails because wr_vxsat_valid/wr_vxsat signals are connected
+    to dead-end local wires in RvvCore.sv instead of output ports.
+    """
+    fixture = await Fixture.Create(dut)
+    r = runfiles.Create()
+    await fixture.load_elf_and_lookup_symbols(
+        r.Rlocation('coralnpu_hw/tests/cocotb/rvv/arithmetics/vnclip_test.elf'),
+        ['impl', 'vnclip_vxsat_check', 'vxsat_result', 'buf32', 'buf16',
+         'buf_shift16'],
+    )
+
+    # Point impl to our vxsat test function
+    await fixture.write_ptr('impl', 'vnclip_vxsat_check')
+    await fixture.run_to_halt()
+
+    # Read the vxsat value that was stored to memory
+    vxsat_val = (await fixture.read_word('vxsat_result')).view(np.uint32)[0]
+
+    # vxsat should be 1 after saturation occurred
+    assert vxsat_val == 1, (
+        f"vxsat CSR should be 1 after saturating vnclip operation, "
+        f"but got {vxsat_val}. This indicates the vxsat update path is broken."
+    )
+
+
+@cocotb.test()
 async def vnclipu_test(dut):
     """Test vnclipu usage accessible from intrinsics."""
     # TODO(davidgao): test different vxrm here too.

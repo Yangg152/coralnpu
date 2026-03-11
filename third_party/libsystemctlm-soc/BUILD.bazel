@@ -23,6 +23,7 @@ cc_library(
     name = "libsystemctlm_soc",
     hdrs = glob([
         "checkers/**/*.h",
+        "soc/**/*.h",
         "tests/test-modules/**/*.h",
         "tlm-bridges/**/*.h",
         "tlm-extensions/**/*.h",

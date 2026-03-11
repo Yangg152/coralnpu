@@ -13,6 +13,7 @@ case object Out extends PortDirection
 sealed trait PortType
 case object Clk extends PortType
 case object Bool extends PortType
+case class Logic(width: Int) extends PortType
 
 /**
  * Defines a non-TileLink port to be exposed at the subsystem boundary.
@@ -42,12 +43,22 @@ case class CoreTlulParameters(
   enableFetchL0: Boolean,
   fetchDataBits: Int,
   enableFloat: Boolean,
-  memoryRegions: Seq[MemoryRegion]
+  memoryRegions: Seq[MemoryRegion],
 ) extends ModuleParameters
 
 /** Parameters for the Spi2TLUL module. */
 case class Spi2TlulParameters(
   lsuDataBits: Int
+) extends ModuleParameters
+
+/** Parameters for the SpiMaster module. */
+case class SpiMasterParameters(
+  lsuDataBits: Int
+) extends ModuleParameters
+
+/** Parameters for the GPIO module. */
+case class GPIOModuleParameters(
+  width: Int
 ) extends ModuleParameters
 
 
@@ -104,7 +115,7 @@ class SoCChiselConfig(itcmSize: MemorySize, dtcmSize: MemorySize) {
         enableFetchL0 = false,
         fetchDataBits = 128,
         enableFloat = true,
-        memoryRegions = memoryRegions
+        memoryRegions = memoryRegions,
       ),
       hostConnections = Map("io.tl_host" -> "coralnpu_core"),
       deviceConnections = Map("io.tl_device" -> "coralnpu_device"),
@@ -113,7 +124,16 @@ class SoCChiselConfig(itcmSize: MemorySize, dtcmSize: MemorySize) {
         ExternalPort("fault",  Bool, Out, "io.fault"),
         ExternalPort("wfi",    Bool, Out, "io.wfi"),
         ExternalPort("irq",    Bool, In,  "io.irq"),
-        ExternalPort("te",     Bool, In,  "io.te")
+        ExternalPort("te",     Bool, In,  "io.te"),
+        ExternalPort("dm_req_valid", Bool, In, "io.dm.req.valid"),
+        ExternalPort("dm_req_ready", Bool, Out, "io.dm.req.ready"),
+        ExternalPort("dm_req_bits_address", Logic(32), In, "io.dm.req.bits.address"),
+        ExternalPort("dm_req_bits_data", Logic(32), In, "io.dm.req.bits.data"),
+        ExternalPort("dm_req_bits_op", Logic(2), In, "io.dm.req.bits.op"),
+        ExternalPort("dm_rsp_valid", Bool, Out, "io.dm.rsp.valid"),
+        ExternalPort("dm_rsp_ready", Bool, In, "io.dm.rsp.ready"),
+        ExternalPort("dm_rsp_bits_data", Logic(32), Out, "io.dm.rsp.bits.data"),
+        ExternalPort("dm_rsp_bits_op", Logic(2), Out, "io.dm.rsp.bits.op"),
       )
     ),
     ChiselModuleConfig(
@@ -126,6 +146,30 @@ class SoCChiselConfig(itcmSize: MemorySize, dtcmSize: MemorySize) {
         ExternalPort("spi_csb",  Bool, In,  "io.spi.csb"),
         ExternalPort("spi_mosi", Bool, In,  "io.spi.mosi"),
         ExternalPort("spi_miso", Bool, Out, "io.spi.miso")
+      )
+    ),
+    ChiselModuleConfig(
+      name = "spi_master",
+      moduleClass = "bus.SpiMaster",
+      params = SpiMasterParameters(lsuDataBits = 32),
+      deviceConnections = Map("io.tl" -> "spi_master"),
+      externalPorts = Seq(
+        ExternalPort("spim_sclk", Bool,  Out, "io.spi.sclk"),
+        ExternalPort("spim_csb",  Bool, Out, "io.spi.csb"),
+        ExternalPort("spim_mosi", Bool, Out, "io.spi.mosi"),
+        ExternalPort("spim_miso", Bool, In,  "io.spi.miso"),
+        ExternalPort("spim_clk_i", Clk, In, "io.spi_clk_i")
+      )
+    ),
+    ChiselModuleConfig(
+      name = "gpio",
+      moduleClass = "bus.GPIO",
+      params = GPIOModuleParameters(width = 8),
+      deviceConnections = Map("io.tl" -> "gpio"),
+      externalPorts = Seq(
+        ExternalPort("gpio_o",    Logic(8), Out, "io.gpio_o"),
+        ExternalPort("gpio_en_o", Logic(8), Out, "io.gpio_en_o"),
+        ExternalPort("gpio_i",    Logic(8), In,  "io.gpio_i")
       )
     )
   )

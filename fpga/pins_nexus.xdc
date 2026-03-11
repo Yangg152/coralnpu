@@ -26,6 +26,15 @@ create_generated_clock -name clk_aon [get_pin i_clkgen/i_clkgen/pll/CLKOUT4]
 # Reset
 set_property -dict { PACKAGE_PIN AR19 IOSTANDARD LVCMOS18 } [get_ports { rst_ni }];
 
+# JTAG
+# 500 kHz clock constraint
+create_clock -period 2000.00 -name jtag_tck_i -waveform {0 1000} [get_ports {tck_i}]
+set_property -dict { PACKAGE_PIN BE18 IOSTANDARD LVCMOS18 PULLTYPE PULLDOWN } [get_ports {tms_i}]
+set_property -dict { PACKAGE_PIN BE17 IOSTANDARD LVCMOS18 PULLTYPE PULLDOWN } [get_ports {td_o}]
+set_property -dict { PACKAGE_PIN BB19 IOSTANDARD LVCMOS18 PULLTYPE PULLDOWN } [get_ports {td_i}]
+set_property -dict { PACKAGE_PIN AW18 IOSTANDARD LVCMOS18 PULLTYPE PULLDOWN } [get_ports {tck_i}]
+set_property -dict { PACKAGE_PIN BC19 IOSTANDARD LVCMOS18 } [get_ports {trst_ni}]
+
 # SPI
 create_clock -period 83.333 -name spi_clk_i -waveform {0 41.667} [get_ports spi_clk_i]
 set_property -dict { PACKAGE_PIN AV19 IOSTANDARD LVCMOS18 } [get_ports { spi_clk_i }];
@@ -55,9 +64,25 @@ set_property -dict { PACKAGE_PIN K36 DRIVE 8 IOSTANDARD LVCMOS12 } [get_ports { 
 set_clock_groups -asynchronous \
   -group [get_clocks -include_generated_clocks sys_clk_pin] \
   -group [get_clocks -include_generated_clocks c0_sys_clk_p] \
-  -group [get_clocks spi_clk_i]
+  -group [get_clocks spi_clk_i] \
+  -group [get_clocks jtag_tck_i]
 
-# SPI Probe Outputs (PMOD3)
+# SPI Probe Outputs (PMOD3) -> Reassigned to SpiMaster
+# PMOD4: 1=AY38, 2=BA39, 3=AW35, 4=AY35, 7=AY40, 8=BA40, 9=AW36, 10=BC40
+set_property -dict { PACKAGE_PIN AY38 IOSTANDARD LVCMOS18 } [get_ports { spim_mosi_o }]; # PMOD4_1 (D0)
+set_property -dict { PACKAGE_PIN BA39 IOSTANDARD LVCMOS18 } [get_ports { spim_miso_i }]; # PMOD4_2 (D1)
+set_property -dict { PACKAGE_PIN AW35 IOSTANDARD LVCMOS18 } [get_ports { gpio[0] }];     # PMOD4_3 (D2)
+set_property -dict { PACKAGE_PIN AY35 IOSTANDARD LVCMOS18 } [get_ports { gpio[1] }];     # PMOD4_3 (D3)
+
+# I2C (PMOD2)
+set_property -dict { PACKAGE_PIN AR35 IOSTANDARD LVCMOS18 } [get_ports { i2c_scl }];     # PMOD2_9
+set_property -dict { PACKAGE_PIN AT35 IOSTANDARD LVCMOS18 } [get_ports { i2c_sda }];     # PMOD2_3
+
+set_property -dict { PACKAGE_PIN AY40 IOSTANDARD LVCMOS18 } [get_ports { spim_sclk_o }]; # PMOD4_7 (CLK)
+set_property -dict { PACKAGE_PIN BA40 IOSTANDARD LVCMOS18 } [get_ports { spim_csb_o }];  # PMOD4_8 (CS)
+set_property -dict { PACKAGE_PIN AW36 IOSTANDARD LVCMOS18 } [get_ports { gpio[2] }];     # PMOD4_9
+set_property -dict { PACKAGE_PIN BC40 IOSTANDARD LVCMOS18 } [get_ports { gpio[3] }];     # PMOD4_10
+
 set_property -dict { PACKAGE_PIN AU40 IOSTANDARD LVCMOS18 } [get_ports { spi_clk_probe_o }];
 set_property -dict { PACKAGE_PIN AV40 IOSTANDARD LVCMOS18 } [get_ports { spi_csb_probe_o }];
 set_property -dict { PACKAGE_PIN AW40 IOSTANDARD LVCMOS18 } [get_ports { spi_mosi_probe_o }];

@@ -34,6 +34,8 @@ class CoreTlul(p: Parameters, coreModuleName: String) extends RawModule {
         val wfi = Output(Bool())
         val irq = Input(Bool())
         val te = Input(Bool())
+
+        val dm = new DebugModuleIO(p)
     })
     dontTouch(io)
 
@@ -49,6 +51,7 @@ class CoreTlul(p: Parameters, coreModuleName: String) extends RawModule {
     io.fault := coreAxi.io.fault
     io.halted := coreAxi.io.halted
 
+    io.dm <> coreAxi.io.dm
     hostBridge.io.axi <> coreAxi.io.axi_master
     deviceBridge.io.axi <> coreAxi.io.axi_slave
 

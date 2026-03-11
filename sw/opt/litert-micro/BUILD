@@ -23,8 +23,43 @@ cc_library(
     hdrs = ["depthwise_conv.h"],
     target_compatible_with = ["//platforms/cpu:coralnpu_v2"],
     deps = [
+        ":memory_util",
         "//sw/opt:rvv_opt",
         "@tflite_micro//tensorflow/lite/micro:op_resolvers",
+    ],
+)
+
+cc_library(
+    name = "conv",
+    srcs = [
+        "conv.cc",
+    ],
+    hdrs = ["conv.h"],
+    target_compatible_with = ["//platforms/cpu:coralnpu_v2"],
+    deps = [
+        ":accumulator_util",
+        ":memory_util",
+        "//sw/opt:rvv_opt",
+        "@tflite_micro//tensorflow/lite/kernels/internal:common",
+        "@tflite_micro//tensorflow/lite/micro:op_resolvers",
+    ],
+)
+
+cc_library(
+    name = "memory_util",
+    hdrs = ["memory_util.h"],
+    target_compatible_with = ["//platforms/cpu:coralnpu_v2"],
+    deps = [
+        "@tflite_micro//tensorflow/lite/kernels/internal:compatibility",
+    ],
+)
+
+cc_library(
+    name = "accumulator_util",
+    hdrs = ["accumulator_util.h"],
+    target_compatible_with = ["//platforms/cpu:coralnpu_v2"],
+    deps = [
+        "@tflite_micro//tensorflow/lite/kernels/internal:compatibility",
     ],
 )
 
@@ -51,6 +86,7 @@ cc_library(
     hdrs = ["conv.h"],
     target_compatible_with = ["//platforms/cpu:coralnpu_v2"], 
     deps = [
+        ":memory_util",
         "//sw/opt:rvv_opt",
         "@tflite_micro//tensorflow/lite/micro:op_resolvers",
     ],

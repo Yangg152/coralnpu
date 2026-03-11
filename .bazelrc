@@ -75,3 +75,11 @@ build:coralnpu_v2 --platforms=//platforms:coralnpu_v2
 
 build --incompatible_enable_cc_toolchain_resolution
 build --use_top_level_targets_for_symlinks=false
+
+# Use GNU BFD linker (compatible with GCC 15 .sframe)
+build --host_linkopt=-fuse-ld=bfd
+build --linkopt=-fuse-ld=bfd
+
+# Disable LLD-specific "start-lib" optimization (incompatible with BFD)
+build --host_features=-supports_start_end_lib
+build --features=-supports_start_end_lib

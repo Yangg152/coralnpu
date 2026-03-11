@@ -14,12 +14,6 @@
 
 #include "tests/systemc/instruction_trace.h"
 
-struct SlogIO {
-  sc_signal<sc_logic> valid;
-  sc_signal<sc_lv<5>> addr;
-  sc_signal<sc_lv<32>> data;
-};
-
 struct DebugIO {
   sc_signal<sc_lv<4>> en;
   sc_signal<sc_lv<32>> cycles;
@@ -141,7 +135,6 @@ SC_MODULE(sc_top) {
   sc_signal<sc_logic> irq;
   sc_signal<bool> te;
 
-  SlogIO slog;
   DebugIO debug;
   DebugModuleIO dm;
   CoreMiniAxi core;

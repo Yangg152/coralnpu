@@ -14,32 +14,32 @@
 
 load(
     "@coralnpu_hw//rules:chisel.bzl",
-    "chisel_library",
     "chisel_cc_library",
+    "chisel_library",
+    "chisel_test",
 )
-load("@coralnpu_hw//rules:coco_tb.bzl", "cocotb_test_suite", "verilator_cocotb_model")
-load("@coralnpu_hw//third_party/python:requirements.bzl", "requirement")
-
-package(default_visibility = ["//visibility:public"])
-
+load("@coralnpu_hw//rules:coco_tb.bzl", "verilator_cocotb_model")
 load(
     "//tests/cocotb:build_defs.bzl",
     "VERILATOR_BUILD_ARGS",
 )
 
+package(default_visibility = ["//visibility:public"])
+
 chisel_library(
     name = "bus",
     srcs = [
         "Axi.scala",
-        "TlulIdRemapper.scala",
-        "TLUL2Axi.scala",
         "Axi2TLUL.scala",
-        "CoralNPUMemIO.scala",
+        "GPIO.scala",
         "SecdedEncoderTestbench.scala",
         "Spi2TLUL.scala",
+        "SpiMaster.scala",
+        "TLUL2Axi.scala",
         "TileLinkUL.scala",
         "TlulFifoAsync.scala",
         "TlulFifoSync.scala",
+        "TlulIdRemapper.scala",
         "TlulIntegrity.scala",
         "TlulIntegrityTestbench.scala",
         "TlulSocket1N.scala",
@@ -223,4 +223,24 @@ verilator_cocotb_model(
     hdl_toplevel = "SecdedEncoderTestbench57",
     trace = True,
     verilog_source = "//hdl/chisel/src/bus:SecdedEncoderTestbench57.sv",
+)
+
+chisel_test(
+    name = "spi_master_test",
+    srcs = ["SpiMasterTest.scala"],
+    deps = [
+        ":bus",
+        "//hdl/chisel/src/common:testing",
+        "//hdl/chisel/src/coralnpu:coralnpu_params",
+    ],
+)
+
+chisel_test(
+    name = "gpio_test",
+    srcs = ["GPIOTest.scala"],
+    deps = [
+        ":bus",
+        "//hdl/chisel/src/common:testing",
+        "//hdl/chisel/src/coralnpu:coralnpu_params",
+    ],
 )

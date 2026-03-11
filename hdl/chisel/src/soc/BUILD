@@ -26,9 +26,11 @@ chisel_library(
     name = "crossbar_config_lib",
     srcs = [
         "CrossbarConfig.scala",
+        "SoCRecords.scala",
         "SoCChiselConfig.scala",
     ],
     deps = [
+        "//hdl/chisel/src/bus",
         "//hdl/chisel/src/coralnpu:coralnpu_params",
     ],
 )

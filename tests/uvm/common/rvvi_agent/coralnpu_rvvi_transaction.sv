@@ -57,7 +57,7 @@ class coralnpu_rvvi_transaction extends uvm_sequence_item;
   logic[(`XLEN-1):0] vlenb;
   agnostic_e vtype_vma;
   agnostic_e vtype_vta;
-  sew_e  vtype_vsew; //000-8,001-16,010-32
+  sew_e  vtype_vsew;//000-8,001-16,010-32
   lmul_e vtype_vlmul;
   logic [0:0] vtype_vill;
 
@@ -77,9 +77,8 @@ class coralnpu_rvvi_transaction extends uvm_sequence_item;
     `uvm_field_int (csr_wb, UVM_DEFAULT)
   `uvm_object_utils_end
 
-  function new (string name = "coralnpu_rvvi_transaction");
+  function new(string name = "coralnpu_rvvi_transaction");
     super.new(name);
-  endfunction : new
+  endfunction:new
 
-
-endclass : coralnpu_rvvi_transaction
+endclass:coralnpu_rvvi_transaction

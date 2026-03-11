@@ -40,4 +40,25 @@ async def core_mini_rvv_memcpy_test(dut):
         result = await fixture.read('out_buf', 512)
         expected_output_buffer[:size_n] = input_data[:size_n]
         assert (expected_output_buffer == result).all()
-        print(f"Total number of execution cycles: {cycle_count} for size_n {size_n}", flush=True)
+
+@cocotb.test()
+async def core_mini_rvv_memset_test(dut):
+
+    fixture = await Fixture.Create(dut)
+    r = runfiles.Create()
+    await fixture.load_elf_and_lookup_symbols(
+        r.Rlocation('coralnpu_hw/tests/cocotb/rvv/rvv_opt/rvv_memset_test.elf'),
+        ['val_in', 'out_buf', 'size_n'])
+    min_value = np.iinfo(np.uint8).min
+    max_value = np.iinfo(np.uint8).max + 1
+    for size_n in [1 , 8, 24 , 33, 48, 61, 127, 128, 231, 256, 501, 512, 0]:
+        for val in [0, 1, 42, 127, 128, 255]:
+            val_u8 = np.uint8(val & 0xFF)
+            expected_output_buffer = np.zeros(512, dtype = np.uint8)
+            await fixture.write('val_in', np.asarray([val], dtype=np.uint32))
+            await fixture.write('out_buf', np.zeros(512, dtype = np.uint8))
+            await fixture.write('size_n', np.asarray([size_n], dtype=np.uint32))
+            cycle_count = await fixture.run_to_halt(timeout_cycles=10000)
+            result = await fixture.read('out_buf', 512)
+            expected_output_buffer[:size_n] = val_u8
+            assert (expected_output_buffer == result).all()

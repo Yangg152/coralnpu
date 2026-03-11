@@ -14,6 +14,7 @@ filesets:
       - lowrisc:tlul:adapter_sram
       - coralnpuv2:ip:sram:0.1
       - coralnpuv2:ip:coralnpu_tlul:0.1
+      - coralnpuv2:ip:i2c_master:0.1
     files:
       - rtl/coralnpu_soc.sv
     file_type: systemVerilogSource
@@ -49,6 +50,11 @@ parameters:
     datatype: bool
     description: "Use Xilinx FPGA primitives"
     default: false
+    paramtype: vlogdefine
+  TB_SUPPORT:
+    datatype: bool
+    description: "Enable TB support in RVV"
+    default: true
     paramtype: vlogdefine
 
 targets:
@@ -86,6 +92,7 @@ targets:
       - MemInitFile
       - USE_GENERIC=true
       - FPGA_XILINX=true
+      - TB_SUPPORT=true
     tools:
       vivado:
         part: "xcvu13p-fhga2104-2-e"

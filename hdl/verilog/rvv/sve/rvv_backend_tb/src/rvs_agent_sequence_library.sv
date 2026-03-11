@@ -1884,6 +1884,10 @@ class alu_random_seq extends alu_random_base_sequence;
   `uvm_object_utils(alu_random_seq)
   `uvm_add_to_seq_lib(alu_random_seq,rvs_sequencer_sequence_library)
 
+  function new(string name = "alu_random_seq");
+    super.new(name);
+  endfunction:new
+
   virtual task body();
     repeat(inst_num) begin
       req = new("req");
@@ -1905,6 +1909,10 @@ endclass: alu_random_seq
 class alu_random_small_lmul_seq extends alu_random_base_sequence;
   `uvm_object_utils(alu_random_small_lmul_seq)
   `uvm_add_to_seq_lib(alu_random_small_lmul_seq,rvs_sequencer_sequence_library)
+
+  function new(string name = "alu_random_small_lmul_seq");
+    super.new(name);
+  endfunction:new
 
   virtual task body();
     repeat(inst_num) begin
@@ -1936,6 +1944,10 @@ class alu_random_large_lmul_seq extends alu_random_base_sequence;
   `uvm_object_utils(alu_random_large_lmul_seq)
   `uvm_add_to_seq_lib(alu_random_large_lmul_seq,rvs_sequencer_sequence_library)
 
+  function new(string name = "alu_random_large_lmul_seq");
+    super.new(name);
+  endfunction:new
+
   virtual task body();
     repeat(inst_num) begin
       req = new("req");
@@ -1964,6 +1976,10 @@ endclass: alu_random_large_lmul_seq
 class alu_random_bypass_seq extends alu_random_base_sequence;
   `uvm_object_utils(alu_random_bypass_seq)
   `uvm_add_to_seq_lib(alu_random_bypass_seq,rvs_sequencer_sequence_library)
+
+  function new(string name = "alu_random_bypass_seq");
+    super.new(name);
+  endfunction:new
 
   virtual task body();
     repeat(inst_num) begin
@@ -1997,6 +2013,10 @@ class alu_random_waw_seq extends alu_random_base_sequence;
   `uvm_object_utils(alu_random_waw_seq)
   `uvm_add_to_seq_lib(alu_random_waw_seq,rvs_sequencer_sequence_library)
 
+  function new(string name = "alu_random_waw_seq");
+    super.new(name);
+  endfunction:new
+
   virtual task body();
     repeat(inst_num) begin
       req = new("req");
@@ -2027,6 +2047,10 @@ endclass: alu_random_waw_seq
 class div_random_seq extends alu_random_base_sequence;
   `uvm_object_utils(div_random_seq)
   `uvm_add_to_seq_lib(div_random_seq,rvs_sequencer_sequence_library)
+
+  function new(string name = "div_random_seq");
+    super.new(name);
+  endfunction:new
 
   virtual task body();
     repeat(inst_num) begin

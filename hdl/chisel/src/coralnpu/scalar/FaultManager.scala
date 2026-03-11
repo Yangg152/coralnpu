@@ -43,7 +43,7 @@ class FaultManager(p: Parameters) extends Module {
       val jalr = Input(Vec(p.instructionLanes, new Bundle {
         val target = UInt(32.W)
       }))
-      val fetchFault = Input(Bool())
+      val fetchFault = Input(Valid(UInt(32.W)))
     }
     val out = Output(Valid(new FaultManagerOutput))
   })
@@ -69,7 +69,7 @@ class FaultManager(p: Parameters) extends Module {
   val bxx_fault_idx = PriorityEncoder(io.in.fault.map(_.bxx))
   val rvv_dispatch_fault = io.in.fault.map(_.rvv.getOrElse(false.B)).reduce(_|_)
   val rvv_dispatch_fault_idx = PriorityEncoder(io.in.fault.map(_.rvv.getOrElse(false.B)))
-  val instr_access_fault = io.in.fetchFault
+  val instr_access_fault = io.in.fetchFault.valid
   val load_fault = io.in.memory_fault.valid && !io.in.memory_fault.bits.write
   val store_fault = io.in.memory_fault.valid && io.in.memory_fault.bits.write
   val rvv_fault = io.in.rvv_fault.map(_.valid).getOrElse(false.B)
@@ -80,7 +80,7 @@ class FaultManager(p: Parameters) extends Module {
     store_fault -> io.in.memory_fault.bits.epc,
     rvv_fault -> io.in.rvv_fault.map(_.bits.mepc).getOrElse(0.U),
     fault -> io.in.pc(first_fault).pc,
-    instr_access_fault -> io.in.memory_fault.bits.epc,
+    instr_access_fault -> io.in.fetchFault.bits,
   ))
 
   val first_fault_is_csr          = (csr_fault && (csr_fault_idx === first_fault))

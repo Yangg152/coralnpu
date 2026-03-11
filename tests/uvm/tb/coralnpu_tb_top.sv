@@ -183,10 +183,7 @@ module coralnpu_tb_top;
     .io_debug_inst_1(),
     .io_debug_inst_2(),
     .io_debug_inst_3(),
-    .io_debug_cycles(),
-    .io_slog_valid(),
-    .io_slog_addr(),
-    .io_slog_data()
+    .io_debug_cycles()
   );
 
 

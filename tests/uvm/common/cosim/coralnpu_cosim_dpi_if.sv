@@ -20,11 +20,9 @@
 package coralnpu_cosim_dpi_if;
 
   typedef struct packed {
-    int unsigned itcm_start_address;  // Start address of the ITCM range.
-    int unsigned itcm_length;         // Length of the ITCM range.
-    int unsigned initial_misa_value;  // Initial value of the misa register.
-    int unsigned dtcm_start_address;  // Start address of the DTCM range.
-    int unsigned dtcm_length;         // Length of the DTCM range.
+    int unsigned itcm_start_address;    // Start address of the ITCM range.
+    int unsigned itcm_length;           // Length of the ITCM range.
+    int unsigned initial_misa_value;    // Initial value of the misa register.
   } sim_config_t;
 
   // Function to initialize the MPACT simulator.
@@ -54,6 +52,13 @@ package coralnpu_cosim_dpi_if;
   import "DPI-C" context function int mpact_get_register(
     input string name,
     output int unsigned value
+  );
+
+  // Function to get a vector register value by its string name.
+  // The C pointer 'svLogicVecVal* value' maps to an 'output' argument in SV.
+  import "DPI-C" context function int mpact_get_vector_register(
+    input string name,
+    output logic [127:0] value
   );
 
   // Function to finalize the MPACT simulator.

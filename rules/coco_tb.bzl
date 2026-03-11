@@ -208,6 +208,10 @@ def verilator_cocotb_test(
         data = data,
     )
 
+    extra_env = list(kwargs.pop("extra_env", []))
+    extra_env.append("COCOTB_TEST_FILTER=$TESTBRIDGE_TEST_ONLY")
+    kwargs["extra_env"] = extra_env
+
     cocotb_test(
         name = name,
         model = model,
@@ -321,6 +325,10 @@ def vcs_cocotb_test(
         ],
         data = data,
     )
+
+    extra_env = list(kwargs.pop("extra_env", []))
+    extra_env.append("COCOTB_TEST_FILTER=$TESTBRIDGE_TEST_ONLY")
+    kwargs["extra_env"] = extra_env
 
     cocotb_test(
         name = name,

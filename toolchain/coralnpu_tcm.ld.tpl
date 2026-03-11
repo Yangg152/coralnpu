@@ -8,7 +8,7 @@ MEMORY {
     EXTMEM(rw): ORIGIN = 0x20000000, LENGTH = 4096K
 }
 
-STACK_SIZE = DEFINED(__stack_size__) ? __stack_size__ : 0x8000;
+STACK_SIZE = DEFINED(__stack_size__) ? __stack_size__ : @@STACK_SIZE@@;
 __stack_size = STACK_SIZE;
 __stack_shift = 7;
 __boot_hart = 0;
@@ -35,11 +35,22 @@ SECTIONS {
       __init_array_end__ = .;
     } > ITCM
 
+    .fini.array : {
+      __fini_array_start = .;
+      __fini_array_start__ = .;
+      KEEP(*(.fini_array))
+      KEEP(*(.fini_array.*))
+      __fini_array_end = .;
+      __fini_array_end__ = .;
+    } > ITCM
+
     .rodata : ALIGN(16) {
       *(.srodata)
       *(.srodata.*)
       *(.rodata)
       *(.rodata.*)
+      *(.data.rel.ro)
+      *(.data.rel.ro.*)
       . = ALIGN(16);
     } > ITCM
 
@@ -62,8 +73,13 @@ SECTIONS {
     } > DTCM
     PROVIDE (__tbss_size = SIZEOF (.tbss));
 
+    .htif : ALIGN(16) {
+      KEEP(*(.htif))
+    } > DTCM
+
     .data : ALIGN(16) {
       __data_start__ = .;
+      __data_start = .;
       /**
       * This will get loaded into `gp`, and the linker will use that register for
       * accessing data within [-2048,2047] of `__global_pointer$`.
@@ -89,8 +105,6 @@ SECTIONS {
       _edata = .;
     } > DTCM
 
-    /* DTCM data here */
-    . = ORIGIN(DTCM);
     .bss : ALIGN(16) {
       __bss_start__ = .;
       __bss_start = .;
@@ -119,10 +133,17 @@ SECTIONS {
 
     /* EXTMEM data here */
     . = ORIGIN(EXTMEM);
-    .extdata (NOLOAD) : ALIGN(16) {
+    .extdata : ALIGN(16) {
       __extdata_start__ = .;
       *(.extdata)
       *(.extdata.*)
       __extdata_end__ = .;
+    } > EXTMEM
+
+    .extbss (NOLOAD) : ALIGN(16) {
+      __extbss_start__ = .;
+      *(.extbss)
+      *(.extbss.*)
+      __extbss_end__ = .;
     } > EXTMEM
 }

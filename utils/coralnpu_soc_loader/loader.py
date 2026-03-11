@@ -17,7 +17,7 @@ import logging
 import time
 
 from elftools.elf.elffile import ELFFile
-from spi_driver import SPIDriver
+from coralnpu_hw.utils.coralnpu_soc_loader.spi_driver import SPIDriver
 from coralnpu_test_utils.spi_constants import SpiRegAddress, SpiCommand, TlStatus
 
 def write_line_via_spi(driver: SPIDriver, address: int, data: int):
@@ -26,7 +26,7 @@ def write_line_via_spi(driver: SPIDriver, address: int, data: int):
     driver.packed_write_transaction(address, 1, data)
 
     # 2. Poll status register until the transaction is done
-    if not driver.poll_reg_for_value(SpiRegAddress.TL_WRITE_STATUS_REG, TlStatus.DONE):
+    if not driver.poll_reg_for_value(SpiRegAddress.TL_WRITE_STATUS_REG, TlStatus.DONE, max_polls=2000):
         raise RuntimeError(f"Timed out waiting for SPI write to 0x{address:08x} to complete")
 
     # 3. Clear the status to return FSM to Idle
@@ -46,7 +46,7 @@ def write_lines_via_spi(driver: SPIDriver, address: int, data_bytes: bytes):
     driver.packed_write_transaction(address, num_lines, data_int)
 
     # 2. Poll status register until the transaction is done
-    if not driver.poll_reg_for_value(SpiRegAddress.TL_WRITE_STATUS_REG, TlStatus.DONE):
+    if not driver.poll_reg_for_value(SpiRegAddress.TL_WRITE_STATUS_REG, TlStatus.DONE, max_polls=2000):
         raise RuntimeError(f"Timed out waiting for SPI write to 0x{address:08x} to complete")
 
     # 3. Clear the status to return FSM to Idle

@@ -81,7 +81,7 @@ bool LookupSymbol(const uint8_t* data, const std::string& symbol_name, uint32_t*
     const Elf32_Sym* symbol = symbol_table + i;
     if (symbol->st_name != 0) {
       const char* found_symbol_name = string_table + symbol->st_name;
-      if (strncmp(found_symbol_name, symbol_name.c_str(), symbol_name.length()) == 0) {
+      if (strcmp(found_symbol_name, symbol_name.c_str()) == 0) {
         *symbol_addr = symbol->st_value;
         return true;
       }

@@ -28,6 +28,10 @@ int8_t buf8[buf_size] __attribute__((section(".data")));
 uint16_t buf_shift16[buf_size] __attribute__((section(".data")));
 uint8_t buf_shift8[buf_size] __attribute__((section(".data")));
 
+// vxsat test: stores the vxsat CSR value after a saturating operation.
+// Expected: 1 after saturation. Bug: returns 0 because vxsat update is dropped.
+uint32_t vxsat_result __attribute__((section(".data"))) = 0xDEADBEEF;
+
 extern "C" {
 // 32 to 16, vxv
 __attribute__((used, retain)) void vnclip_wv_i16mf2() {
@@ -148,6 +152,28 @@ __attribute__((used, retain)) void vnclip_wx_i8m4() {
   const auto in_v = __riscv_vle16_v_i16m8(buf16, vl);
   const auto out_v = __riscv_vnclip_wx_i8m4(in_v, shift_scalar, vxrm, vl);
   __riscv_vse8_v_i8m4(buf8, out_v, vl);
+}
+
+// Test that vxsat CSR is set after a saturating vnclip operation.
+// This test uses MAX_INT32 with shift=0, which must saturate to MAX_INT16.
+// Per RISC-V Vector Extension v1.0 Section 3.5, vxsat should be set to 1.
+// BUG: vxsat remains 0 because wr_vxsat signals are dead-end wires in RvvCore.
+__attribute__((used, retain)) void vnclip_vxsat_check() {
+  // Clear vxsat first to ensure clean test
+  asm volatile("csrwi vxsat, 0");
+
+  // Use MAX_INT32 with shift=0 to guarantee saturation to int16.
+  // 0x7FFFFFFF (2147483647) >> 0 = 2147483647, which saturates to 32767 (0x7FFF).
+  buf32[0] = 0x7FFFFFFF;
+  buf_shift16[0] = 0;  // No shift - guaranteed to saturate
+
+  const auto in_v = __riscv_vle32_v_i32m1(buf32, 1);
+  const auto shift = __riscv_vle16_v_u16mf2(buf_shift16, 1);
+  const auto out_v = __riscv_vnclip_wv_i16mf2(in_v, shift, vxrm, 1);
+  __riscv_vse16_v_i16mf2(buf16, out_v, 1);
+
+  // Read vxsat CSR - should be 1 after saturation occurred
+  asm volatile("csrr %0, vxsat" : "=r"(vxsat_result));
 }
 }
 

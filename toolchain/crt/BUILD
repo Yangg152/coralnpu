@@ -21,7 +21,24 @@ cc_library(
         "coralnpu_exceptions.cc",
         "coralnpu_gloss.cc",
         "coralnpu_start.S",
+        "cxx_guards.cc",
     ],
+    copts = ["-DSKIP_HTIF_SYMBOLS"],
+    alwayslink = True,
+    target_compatible_with = [
+        "//platforms/cpu:coralnpu_v2"
+    ],
+)
+
+cc_library(
+    name = "crt_semihosting",
+    srcs = [
+        "crt.S",
+        "coralnpu_exceptions.cc",
+        "coralnpu_htif_gloss.cc",
+        "coralnpu_start.S",
+    ],
+    alwayslink = True,
     target_compatible_with = [
         "//platforms/cpu:coralnpu_v2"
     ],

@@ -101,6 +101,8 @@ class Rob2Rt(p: Parameters) extends Bundle {
   val trap_flag = Bool()
   val vector_csr = new RvvConfigState(p)
   val vxsaturate = UInt(p.rvvVlenb.W)
+  val uop_pc = UInt(32.W)
+  val last_uop_valid = Bool()
 }
 
 class RvvCsrIO(p: Parameters) extends Bundle {

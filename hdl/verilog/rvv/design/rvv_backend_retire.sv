@@ -32,6 +32,11 @@ module rvv_backend_retire(/*AUTOARG*/
    rob2rt_write_valid, rob2rt_write_data,
    xrf2rt_write_ready, vcsr2rt_write_ready,
    vxsat2rt_write_ready
+`ifdef TB_SUPPORT
+  ,vrf_data,
+  rt2rvvi_valid,
+  rt2rvvi_data
+`endif   
    );
 // global signal
 // Pure combinational logic, thus no clk no rst_n
@@ -59,6 +64,13 @@ module rvv_backend_retire(/*AUTOARG*/
     output  logic                             rt2vxsat_write_valid;
     output  logic   [`VCSR_VXSAT_WIDTH-1:0]   rt2vxsat_write_data;
     input   logic                             vxsat2rt_write_ready;
+
+`ifdef TB_SUPPORT
+// Retire information for RVVI.
+    input   logic    [`NUM_VRF-1:0][`VLEN-1:0]  vrf_data;
+    output  logic    [`NUM_RT_UOP-1:0]          rt2rvvi_valid; // always ready to receive.
+    output  ROB2RT_t [`NUM_RT_UOP-1:0]          rt2rvvi_data;  
+`endif
 
 ////////////Wires & Regs  ///////////////
 logic                            w_type0;
@@ -852,5 +864,31 @@ assign rt2rob_write_ready[2] = w_type2 ? xrf2rt_write_ready[2] :
 assign rt2rob_write_ready[3] = w_type3 ? xrf2rt_write_ready[3] : 
                                          vxsat2rt_ready_int ;
 /////////////////////////////////
+`ifdef TB_SUPPORT
+// retire infomation for RVVI
+  assign rt2rvvi_valid = rob2rt_write_valid&rt2rob_write_ready;
+
+  always_comb begin
+    rt2rvvi_data[0] = rob2rt_write_data[0];
+
+    for(int j=1;j<`NUM_RT_UOP;j++) begin
+      rt2rvvi_data[j] = rob2rt_write_data[j];
+
+      if(rob2rt_write_data[j].w_type==VRF) begin
+        rt2rvvi_data[j].vd_type = {`VLENB{BODY_ACTIVE}};
+        rt2rvvi_data[j].w_data  = vrf_data[rob2rt_write_data[j].w_index];
+
+        for(int i=0;i<=j;i++) begin: waw
+          if((rob2rt_write_data[i].w_index==rob2rt_write_data[j].w_index) & (rob2rt_write_data[i].w_type==VRF)) begin
+            for(int k=0;k<`VLENB;k++) begin
+              if(rob2rt_write_data[i].vd_type[k]==BODY_ACTIVE) 
+                rt2rvvi_data[j].w_data[k*`BYTE_WIDTH+:`BYTE_WIDTH] = rob2rt_write_data[i].w_data[k*`BYTE_WIDTH+:`BYTE_WIDTH];
+            end
+          end
+        end
+      end
+    end
+  end
+`endif
 
 endmodule

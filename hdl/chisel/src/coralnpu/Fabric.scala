@@ -19,36 +19,40 @@ import chisel3.util._
 
 import common._
 
-// Picks one of two fabric commands to route to a port. Priority is given to the
-// first port.
-class FabricArbiter(p: Parameters) extends Module {
+// Picks one of N fabric commands to route to a port. Priority is given to the
+// earliest valid port.
+class FabricArbiter(p: Parameters, n: Int = 2) extends Module {
   val io = IO(new Bundle {
-    val source = Vec(2, Flipped(new FabricIO(p)))
-    val fabricBusy = Output(Bool())  // Back pressure for the second port
+    val source = Vec(n, Flipped(new FabricIO(p)))
+    val fabricBusy = Output(Vec(n, Bool()))  // Back pressure for each port
     val port = new FabricIO(p)
   })
   // Only read, or only write (or none) can be issued.
-  assert(!(io.source(0).readDataAddr.valid && io.source(0).writeDataAddr.valid))
-  assert(!(io.source(1).readDataAddr.valid && io.source(1).writeDataAddr.valid))
-  val source0Valid = io.source(0).readDataAddr.valid ||
-                     io.source(0).writeDataAddr.valid
+  assert(!io.source.map(x => x.readDataAddr.valid && x.writeDataAddr.valid).reduce(_ || _))
+  val sourceValid = io.source.map(x => x.readDataAddr.valid || x.writeDataAddr.valid)
 
-  io.fabricBusy := source0Valid
+  // fabricBusy(i) is true if any source with higher priority (index < i) is valid.
+  val busySignals = sourceValid.scanLeft(false.B)(_ || _).dropRight(1)
+  io.fabricBusy := VecInit(busySignals)
 
-  io.port.readDataAddr  := Mux(source0Valid, io.source(0).readDataAddr,
-                                             io.source(1).readDataAddr)
-  io.port.writeDataAddr := Mux(source0Valid, io.source(0).writeDataAddr,
-                                             io.source(1).writeDataAddr)
-  io.port.writeDataBits := Mux(source0Valid, io.source(0).writeDataBits,
-                                             io.source(1).writeDataBits)
-  io.port.writeDataStrb := Mux(source0Valid, io.source(0).writeDataStrb,
-                                             io.source(1).writeDataStrb)
+  io.port.readDataAddr := MuxCase(MakeInvalid(UInt(p.axi2AddrBits.W)),
+    (0 until n).map(x => (sourceValid(x) -> io.source(x).readDataAddr))
+  )
+  io.port.writeDataAddr := MuxCase(MakeInvalid(UInt(p.axi2AddrBits.W)),
+    (0 until n).map(x => (sourceValid(x) -> io.source(x).writeDataAddr))
+  )
+  io.port.writeDataBits := MuxCase(0.U(p.axi2DataBits.W),
+    (0 until n).map(x => (sourceValid(x) -> io.source(x).writeDataBits))
+  )
+  io.port.writeDataStrb := MuxCase(0.U((p.axi2DataBits / 8).W),
+    (0 until n).map(x => (sourceValid(x) -> io.source(x).writeDataStrb))
+  )
 
   // Broadcast SRAM outputs back
-  io.source(0).readData := io.port.readData
-  io.source(1).readData := io.port.readData
-  io.source(0).writeResp := io.port.writeResp
-  io.source(1).writeResp := io.port.writeResp
+  for (i <- 0 until n) {
+    io.source(i).readData := io.port.readData
+    io.source(i).writeResp := io.port.writeResp
+  }
 }
 
 // Routes one fabric command from source to a given port.

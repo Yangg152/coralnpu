@@ -27,6 +27,7 @@ VERILATOR_BUILD_ARGS = [
     "-Wno-WIDTHTRUNC",
     "-Wno-UNSIGNED",
     "-DUSE_GENERIC=\"\"",
+    "-DTB_SUPPORT",
 ]
 
 VCS_BUILD_ARGS = [
@@ -50,4 +51,7 @@ VCS_TEST_ARGS = [
     "line+cond+tgl+branch+assert",
 ]
 
-VCS_DEFINES = {"USE_GENERIC": ""}
+VCS_DEFINES = {
+    "USE_GENERIC": "",
+    "TB_SUPPORT": "",
+}

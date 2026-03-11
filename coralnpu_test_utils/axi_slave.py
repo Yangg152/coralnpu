@@ -49,10 +49,11 @@ class AxiSlave:
             ardata = await self.ar_queue.get()
             if self.has_memory:
                 addr = ardata["addr"] - self.mem_base_addr
-                num_bytes = 2**ardata["size"]
+                bus_bytes = len(getattr(self.dut, f'io_{self.name}_read_data_bits_data').value.to_bytes(byteorder="big"))
+                aligned_addr = (addr // bus_bytes) * bus_bytes
                 read_bytes = bytearray()
-                for i in range(num_bytes):
-                    read_bytes.append(self.memory.get(addr + i, 0xBD))
+                for i in range(bus_bytes):
+                    read_bytes.append(self.memory.get(aligned_addr + i, 0x00))
                 read_data = int.from_bytes(read_bytes, byteorder='little')
             else:
                 read_data = 0xDEADBEEF
@@ -73,11 +74,13 @@ class AxiSlave:
             resp = 0
             if self.has_memory:
                 addr = awdata["addr"] - self.mem_base_addr
+                bus_bytes = len(wdata["data"])
+                aligned_addr = (addr // bus_bytes) * bus_bytes
                 strb = int(wdata["strb"])
                 data = wdata["data"]
-                for i in range(len(data)):
+                for i in range(bus_bytes):
                     if (strb >> i) & 1:
-                        self.memory[addr + i] = data[len(data)-1-i]
+                        self.memory[aligned_addr + i] = data[bus_bytes-1-i]
             else:
                 resp = 3 # DECERR
                 self.log.error(f"Write received on slave {self.name}, which does not have memory.")
@@ -141,7 +144,7 @@ class AxiSlave:
           try:
             if getattr(self.dut, f'io_{self.name}_write_data_valid').value:
               wdata = dict()
-              wdata["data"] = getattr(self.dut, f'io_{self.name}_write_data_bits_data').value.buff
+              wdata["data"] = getattr(self.dut, f'io_{self.name}_write_data_bits_data').value.to_bytes(byteorder="big")
               for prop in ["strb", "last"]:
                   wdata[prop] = getattr(self.dut, f'io_{self.name}_write_data_bits_{prop}').value
               await self.w_queue.put(wdata)

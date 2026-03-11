@@ -54,6 +54,7 @@ class BranchState(p: Parameters) extends Bundle {
   val fwd = Bool()
   val op = BruOp()
   val target = UInt(p.programCounterBits.W)
+  val originalTarget = UInt(p.programCounterBits.W)
   val linkValid = Bool()
   val linkAddr = UInt(5.W)
   val linkData = UInt(p.programCounterBits.W)
@@ -67,6 +68,7 @@ object BranchState {
     result.fwd := false.B
     result.op := BruOp.JAL
     result.target := 0.U
+    result.originalTarget := 0.U
     result.linkValid := false.B
     result.linkAddr := 0.U
     result.linkData := 0.U
@@ -93,6 +95,9 @@ class Bru(p: Parameters, first: Boolean) extends Module {
     val rs2 = Input(new RegfileReadDataIO)
     val rd  = Valid(Flipped(new RegfileWriteDataIO))
     val taken = new BranchTakenIO(p)
+    val actually_taken = Output(Bool())
+    val real_target = Output(UInt(p.programCounterBits.W))
+    val pc = Output(UInt(p.programCounterBits.W))
     val target = Flipped(new RegfileBranchTargetIO)
     val interlock = Option.when(first)(Output(Bool()))
 
@@ -118,17 +123,15 @@ class Bru(p: Parameters, first: Boolean) extends Module {
   nextState.linkData := pc4De
   nextState.pcEx := pcDe
   nextState.inst := io.req.bits.inst
+  nextState.originalTarget := io.req.bits.target
 
   val mtvec = if (first) { Cat(io.csr.get.out.mtvec(31,2), 0.U(2.W)) } else { 0.U(32.W )}
   val pipeline0Target = if (first) {
-    val mret = (io.req.bits.op === BruOp.MRET) && mode === CsrMode.Machine
+    val mret = (io.req.bits.op === BruOp.MRET)
     val ecall = io.req.bits.op === BruOp.ECALL
-    val call = ((io.req.bits.op === BruOp.MRET) && mode === CsrMode.User) ||
-        io.req.bits.op.isOneOf(BruOp.EBREAK, BruOp.MPAUSE)
     MuxCase(io.req.bits.target, Seq(
       ecall -> mtvec,
       mret -> io.csr.get.out.mepc,
-      call -> io.csr.get.out.mepc,
       (io.req.bits.op === BruOp.WFI) -> pc4De,
     ))
   } else { io.req.bits.target }
@@ -171,14 +174,25 @@ class Bru(p: Parameters, first: Boolean) extends Module {
   // This mux contains the subset of ops that are only emitted in pipeline slot 0.
   val pipeline0Taken = if (first) {
     MuxLookup(op, false.B)(Seq(
-      BruOp.EBREAK -> (mode === CsrMode.User),
-      // Any mode can execute `ecall`, but the value of `mcause` will be different.
+      BruOp.EBREAK -> false.B,
       BruOp.ECALL  -> true.B,
-      BruOp.MPAUSE -> (mode === CsrMode.User),
-      BruOp.MRET   -> (mode === CsrMode.Machine),
+      BruOp.MPAUSE -> false.B,
+      BruOp.MRET   -> true.B,
       BruOp.WFI    -> true.B,
     ))
   } else { false.B }
+
+  val isTaken = MuxLookup(op, pipeline0Taken)(Seq(
+    BruOp.JAL    -> true.B,
+    BruOp.JALR   -> true.B,
+    BruOp.BEQ    -> eq,
+    BruOp.BNE    -> neq,
+    BruOp.BLT    -> lt,
+    BruOp.BGE    -> ge,
+    BruOp.BLTU   -> ltu,
+    BruOp.BGEU   -> geu,
+    BruOp.FAULT  -> true.B,
+  ))
 
   io.taken.valid := stateReg.valid && MuxLookup(op, pipeline0Taken)(Seq(
     BruOp.JAL    -> (true.B =/= stateReg.bits.fwd),
@@ -191,6 +205,13 @@ class Bru(p: Parameters, first: Boolean) extends Module {
     BruOp.BGEU   -> (geu =/= stateReg.bits.fwd),
     BruOp.FAULT  -> true.B,
   ))
+  io.actually_taken := stateReg.valid && isTaken
+  io.real_target := Mux(stateReg.bits.fwd,
+                        Mux(stateReg.bits.op === BruOp.JALR,
+                            io.target.data & "xFFFFFFFE".U,
+                            stateReg.bits.originalTarget),
+                        stateReg.bits.target)
+  io.pc := stateReg.bits.pcEx
 
   io.taken.value := stateReg.bits.target
 
@@ -204,16 +225,10 @@ class Bru(p: Parameters, first: Boolean) extends Module {
         BruOp.EBREAK, BruOp.ECALL,
         BruOp.MPAUSE, BruOp.MRET, BruOp.FAULT)
     // Usage Fault.
-    val usageFault = (stateReg.valid && Mux(
-              (mode === CsrMode.User),
-              op.isOneOf(BruOp.MPAUSE, BruOp.MRET),
-              op.isOneOf(BruOp.EBREAK)))
+    val usageFault = stateReg.valid && op.isOneOf(BruOp.EBREAK)
 
-    io.csr.get.in.mode.valid := stateReg.valid && Mux(
-        (mode === CsrMode.User), op.isOneOf(BruOp.EBREAK, BruOp.ECALL,
-                                            BruOp.MPAUSE, BruOp.MRET, BruOp.FAULT),
-              (op === BruOp.MRET))
-    io.csr.get.in.mode.bits := Mux(((op === BruOp.MRET) && (mode === CsrMode.Machine)), CsrMode.Machine, CsrMode.User)
+    io.csr.get.in.mode.valid := stateReg.valid && (op === BruOp.MRET)
+    io.csr.get.in.mode.bits := CsrMode.Machine
 
     io.csr.get.in.mepc.valid :=
       (stateReg.valid && (op === BruOp.ECALL)) ||
@@ -225,17 +240,14 @@ class Bru(p: Parameters, first: Boolean) extends Module {
     io.csr.get.in.mcause.valid := (stateReg.valid &&
       (
         usageFault ||
-        (op === BruOp.ECALL) ||
-        ((mode === CsrMode.User) && (op === BruOp.EBREAK))
+        (op === BruOp.ECALL)
       ) || io.fault_manager.get.valid
     )
 
     io.csr.get.in.mcause.bits := MuxCase(0.U, Seq(
         // RISC-V standard exceptions.
         io.fault_manager.get.valid -> io.fault_manager.get.bits.mcause,
-        (op === BruOp.ECALL && mode === CsrMode.Machine)  -> 11.U,
-        (op === BruOp.ECALL && mode === CsrMode.User)  -> 8.U,
-        (op === BruOp.EBREAK) -> 3.U,
+        (op === BruOp.ECALL)  -> 11.U,
         // CoralNPU-specific things, use the custom reserved region of the encoding space.
         usageFault            -> (24 + 1).U,
     ))
@@ -247,13 +259,12 @@ class Bru(p: Parameters, first: Boolean) extends Module {
     ))
 
     // Pipeline will be halted.
-    io.csr.get.in.halt := (stateReg.valid && (op === BruOp.MPAUSE) && (mode === CsrMode.Machine)) ||
+    io.csr.get.in.halt := (stateReg.valid && (op === BruOp.MPAUSE)) ||
                       io.csr.get.in.fault
     // Faults that should halt the processor.
     // A fault that can be handled by software exception routines should
     // not be captured here.
-    io.csr.get.in.fault :=
-      ((usageFault && (mode === CsrMode.Machine)))
+    io.csr.get.in.fault := usageFault
     io.csr.get.in.wfi := stateReg.valid && (op === BruOp.WFI)
   }
 

@@ -158,7 +158,7 @@ async def core_mini_axi_master_write_alignment(dut):
     entry_point = await core_mini_axi.load_elf(f)
     await core_mini_axi.execute_from(entry_point)
 
-    await core_mini_axi.wait_for_halted_semihost(f)
+    await core_mini_axi.wait_for_halted()
     assert core_mini_axi.dut.io_fault.value == 0
 
 @cocotb.test()
@@ -261,7 +261,7 @@ async def core_mini_axi_csr_test(dut):
   # Read invalid CSRs, expect error response
   for i in range(3, 0x100 // 4):
     misc_csr_rdata = await core_mini_axi.read_word(0x30000 + (4 * i), expected_resp=AxiResp.SLVERR)
-  for i in range(9, 0x2000 // 4):
+  for i in [i for i in range(9, 0x2000 // 4) if (0x100 + 4 * i) not in range(0x800, 0x818)]:
     misc_csr_rdata = await core_mini_axi.read_word(0x30100 + (4 * i), expected_resp=AxiResp.SLVERR)
 
 @cocotb.test()

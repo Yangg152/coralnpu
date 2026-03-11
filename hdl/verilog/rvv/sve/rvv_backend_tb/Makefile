@@ -151,6 +151,14 @@ ASSERT_OPTS = -assert global_finish_maxfail=1		\
 							-assert set_info_action=display	\
 							-assert quiet+quiet1+nopostproc
 
+ifeq ($(xprop_en), on)
+VCOMP_XPROP_OPTS := -xprop=xmerge
+VSIM_XPROP_OPTS  := -xprop=banner	
+else
+VCOMP_XPROP_OPTS := 
+VSIM_XPROP_OPTS  := 
+endif
+
 BUILD_PATH = $(RVV_ROOT)/build/$(scfg)
 
 SIM_PATH	 = $(RVV_ROOT)/$(logdir)/$(scfg)/$(TESTNAME)
@@ -170,6 +178,7 @@ VCOMP = vcs -full64 -sverilog +define+SV	\
 				$(UVM_DEBUG_COMP)	\
 				-Mupdate -Mdir=$(BUILD_PATH)/csrc	\
 				$(PARTCOMP)	\
+				$(VCOMP_XPROP_OPTS)	\
 				-f $(RVV_ROOT)/$(scfg).vlst -top $(TB_TOP)	\
 				-o $(BUILD_PATH)/simv	 
 
@@ -179,6 +188,7 @@ VSIM  = $(BUILD_PATH)/simv	\
 				+vcs+lic+wait  \
 				$(ASSERT_OPTS)	\
 				$(SEED)	\
+				$(VSIM_XPROP_OPTS) \
 				$(PLUS_ARGS)	\
 				+UVM_TESTNAME=$(UVM_TEST) +UVM_VERBOSITY=$(UVM_VERBOSITY) \
 				$(DUMP) $(UVM_DEBUG_SIM)	\

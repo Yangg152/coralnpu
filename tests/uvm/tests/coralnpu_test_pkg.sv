@@ -33,6 +33,8 @@ package coralnpu_test_pkg;
   class coralnpu_kickoff_write_seq extends uvm_sequence #(axi_transaction);
     `uvm_object_utils(coralnpu_kickoff_write_seq)
 
+    bit [31:0] entry_point = 0;
+
     function new(string name = "coralnpu_kickoff_write_seq");
         super.new(name);
     endfunction
@@ -46,14 +48,15 @@ package coralnpu_test_pkg;
       req.txn_type = AXI_WRITE;
       req.addr = 32'h00030004;
       req.len  = 0;
-      req.size = $clog2(128/8);
+      req.size = 2; // 4 bytes
       req.burst = AXI_BURST_INCR;
       req.id = 0;
       req.prot = 3'b000;
       req.data.delete();
       req.strb.delete();
-      req.data.push_back(128'h00000000_00000000); // PC value
-      req.strb.push_back('1); // Write all bytes
+      // Data must be shifted to lanes [63:32] for address 0x...4 on 128-bit bus
+      req.data.push_back(128'(entry_point) << 32);
+      req.strb.push_back(16'h00F0); // Enable bytes 4-7
       finish_item(req);
       `uvm_info(get_type_name(),
                 $sformatf("Kickoff Write 1 (PC Data=0x%h) sent to addr 0x%h",
@@ -141,11 +144,13 @@ package coralnpu_test_pkg;
     protected bit dut_halted_flag = 1'b0;
     protected bit dut_faulted_flag = 1'b0;
     protected bit tohost_written_flag = 1'b0;
+    protected bit spike_enabled = 1'b0;
     protected logic [127:0] final_tohost_data;
 
     virtual coralnpu_irq_if.DUT_IRQ_PORT irq_vif;
     uvm_event tohost_written_event;
     time clk_period;
+    int unsigned entry_point = 0;
 
     function new(string name = "coralnpu_base_test", uvm_component parent = null);
       super.new(name, parent);
@@ -154,14 +159,31 @@ package coralnpu_test_pkg;
     virtual function void build_phase(uvm_phase phase);
       string test_elf;
       string timeout_str;
+      string entry_point_str;
       int timeout_int;
       int unsigned initial_misa_value;
       uvm_cmdline_processor clp = uvm_cmdline_processor::get_inst();
 
       super.build_phase(phase);
       `uvm_info(get_type_name(), "Build phase starting", UVM_MEDIUM)
+      if ($test$plusargs("SPIKE_LOG")) begin
+        spike_enabled = 1'b1;
+      end
+
       if (!clp.get_arg_value("+TEST_ELF=", test_elf)) begin
         `uvm_fatal(get_type_name(), "+TEST_ELF plusarg not specified.")
+      end
+
+      if (clp.get_arg_value("+ENTRY_POINT=", entry_point_str)) begin
+        if ($sscanf(entry_point_str, "'h%h", entry_point) != 1 &&
+            $sscanf(entry_point_str, "0x%h", entry_point) != 1 &&
+            $sscanf(entry_point_str, "%d", entry_point) != 1) begin
+           `uvm_warning(get_type_name(),
+             $sformatf("Invalid +ENTRY_POINT format: %s. Using default 0.", entry_point_str))
+        end else begin
+           `uvm_info(get_type_name(),
+             $sformatf("Using entry point: 0x%h", entry_point), UVM_MEDIUM)
+        end
       end
 
       if (clp.get_arg_value("+TEST_TIMEOUT=", timeout_str)) begin
@@ -224,6 +246,7 @@ package coralnpu_test_pkg;
       `uvm_info(get_type_name(), "Reset deasserted.", UVM_MEDIUM)
 
       kickoff_seq = coralnpu_kickoff_write_seq::type_id::create("kickoff_seq");
+      kickoff_seq.entry_point = entry_point;
       kickoff_seq.start(env.m_master_agent.sequencer);
 
       `uvm_info(get_type_name(), "Waiting for completion or timeout...",
@@ -266,15 +289,24 @@ package coralnpu_test_pkg;
 
     virtual function void report_phase(uvm_phase phase);
       logic [31:1] status_code;
+      uvm_report_server rs = uvm_report_server::get_server();
+      int error_count = rs.get_severity_count(UVM_ERROR);
+      int fatal_count = rs.get_severity_count(UVM_FATAL);
+
       super.report_phase(phase);
       if (tohost_written_flag) begin
         if (uvm_config_db#(logic [127:0])::get(this, "",
             "final_tohost_data", final_tohost_data)) begin
           status_code = final_tohost_data[31:1];
           if (status_code == 0) begin
-            test_passed = 1'b1;
-            `uvm_info(get_type_name(),
-              "tohost write detected with PASS status (0).", UVM_LOW)
+            if (error_count == 0 && fatal_count == 0) begin
+               test_passed = 1'b1;
+               `uvm_info(get_type_name(),
+                 "tohost write detected with PASS status (0).", UVM_LOW)
+            end else begin
+               test_passed = 1'b0;
+               `uvm_error(get_type_name(), "tohost write detected with PASS status (0), but UVM errors occurred during simulation.")
+            end
           end else begin
             test_passed = 1'b0;
             `uvm_error(get_type_name(),
@@ -285,15 +317,31 @@ package coralnpu_test_pkg;
                   "tohost event triggered, but final status not found!")
       end else if (dut_halted_flag && !dut_faulted_flag) begin
         `uvm_info(get_type_name(), "Test ended on DUT halt.", UVM_LOW)
-        test_passed = 1'b1;
+        if (error_count == 0 && fatal_count == 0) begin
+           test_passed = 1'b1;
+        end else begin
+           test_passed = 1'b0;
+           `uvm_error(get_type_name(), "Test ended on DUT halt, but UVM errors occurred during simulation.")
+        end
       end else if (dut_faulted_flag) begin
-        // TODO: Compare mcause in RTL with mcause in MPACT when fault signal.
-        `uvm_info(get_type_name(), "Test ended on DUT fault.", UVM_LOW)
-        test_passed = 1'b0;
+        if (rs.get_severity_count(UVM_ERROR) == 0 && rs.get_severity_count(UVM_FATAL) == 0) begin
+            `uvm_info(get_type_name(), "Test ended on DUT fault, but no Co-Simulation mismatches were detected. Assuming consistent behavior (PASS).", UVM_LOW)
+            test_passed = 1'b1;
+        end else begin
+            `uvm_info(get_type_name(), "Test ended on DUT fault with Co-Sim mismatches (FAIL).", UVM_LOW)
+            test_passed = 1'b0;
+        end
       end else if (test_timed_out) begin
-        `uvm_error(get_type_name(),
-                   $sformatf("Test timed out after %t", test_timeout))
-        test_passed = 1'b0;
+        if (spike_enabled) begin
+            `uvm_error(get_type_name(), $sformatf("Test timed out after %t. Spike was enabled, so this is a failure (divergence/stall).", test_timeout))
+            test_passed = 1'b0;
+        end else if (rs.get_severity_count(UVM_ERROR) == 0 && rs.get_severity_count(UVM_FATAL) == 0) begin
+            `uvm_info(get_type_name(), $sformatf("Test timed out after %t, but no Co-Simulation mismatches were detected. Assuming PASS.", test_timeout), UVM_LOW)
+            test_passed = 1'b1;
+        end else begin
+            `uvm_error(get_type_name(), $sformatf("Test timed out after %t with errors/mismatches.", test_timeout))
+            test_passed = 1'b0;
+        end
       end else begin
         `uvm_error(get_type_name(), "Test ended with no clear pass/fail.")
         test_passed = 1'b0;

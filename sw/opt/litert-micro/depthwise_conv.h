@@ -24,7 +24,7 @@ void DepthwiseConvPerChannel(
     const int8_t* in_data, const tflite::RuntimeShape& f_shape,
     const int8_t* f_data, const tflite::RuntimeShape& bias_shape,
     const int32_t* bias_data, const tflite::RuntimeShape& out_shape,
-    int8_t* out_data);
+    int8_t* out_data, int32_t* accs_buf);
 
 TFLMRegistration Register_DEPTHWISE_CONV_2D();
 }  // namespace coralnpu_v2::opt::litert_micro

@@ -1,20 +1,18 @@
-/*
-description: 
-1. the VRF contains 32xVLEN register file. It support 4 read ports and 4 write ports
 
-feature list:
-*/
 `ifndef HDL_VERILOG_RVV_DESIGN_RVV_SVH
 `include "rvv_backend.svh"
 `endif
 
 module rvv_backend_vrf(/*AUTOARG*/
-   // Outputs
-   vrf2dp_rd_data, vrf2dp_v0_data,
-   // Inputs
-   clk, rst_n, dp2vrf_rd_index, 
-   rt2vrf_wr_valid, rt2vrf_wr_data
-   );  
+  // Outputs
+  vrf2dp_rd_data, vrf2dp_v0_data,
+`ifdef TB_SUPPORT
+  vrf_data,
+`endif
+  // Inputs
+  clk, rst_n, dp2vrf_rd_index, 
+  rt2vrf_wr_valid, rt2vrf_wr_data
+);  
 // global signal
 input   logic                   clk;
 input   logic                   rst_n;
@@ -30,6 +28,10 @@ output  logic                      [`VLEN-1:0]  vrf2dp_v0_data;
 // Write back to VRF
 input   logic     [`NUM_RT_UOP-1:0] rt2vrf_wr_valid;
 input   RT2VRF_t  [`NUM_RT_UOP-1:0] rt2vrf_wr_data;
+`ifdef TB_SUPPORT
+// send VRF updating value to RVVI, corresponding to rt2vrf_wr_data;
+output  logic     [`NUM_VRF-1:0][`VLEN-1:0] vrf_data;
+`endif
 
 // Wires & Regs
 genvar  j,k;
@@ -99,6 +101,10 @@ vrf_reg (
   .wen    (vrf_wr_wen_full),
   .wdata  (vrf_wr_data_full)
 );
+
+`ifdef TB_SUPPORT
+assign vrf_data = vrf_rd_data_full;
+`endif
 
 // VRF2DP data pack
 assign vrf2dp_v0_data = vrf_rd_data_full[0];

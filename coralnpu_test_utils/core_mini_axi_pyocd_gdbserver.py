@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import socket
 import queue
 import subprocess
 import tempfile
@@ -38,6 +39,7 @@ class CoreMiniAxiDebugOps(Enum):
     SET_BREAKPOINT = 4
     REMOVE_BREAKPOINT = 5
     STEP = 6
+    WRITE_MEMORY_BLOCK8 = 7
 
 class CoreMiniAxiProbe(DebugProbe):
     def __init__(self, session):
@@ -190,6 +192,9 @@ class CoreMiniAxiContext(DebugContext):
     def read_memory_block8(self, addr, size):
         return self.target.read_memory_block8(addr, size)
 
+    def write_memory_block8(self, addr, data) -> None:
+        self.target.write_memory_block8(addr, data)
+
     def flush(self):
         pass
 
@@ -239,6 +244,16 @@ class CoreMiniAxiTarget(Target):
         self.q.put((CoreMiniAxiDebugOps.READ_MEMORY_BLOCK8, e, {
             'addr': addr,
             'size': size,
+        }))
+        e.wait()
+        rsp = self.q_rsp.get()
+        return rsp
+
+    def write_memory_block8(self, addr, size):
+        e = threading.Event()
+        self.q.put((CoreMiniAxiDebugOps.WRITE_MEMORY_BLOCK8, e, {
+            'addr': addr,
+            'data': size,
         }))
         e.wait()
         rsp = self.q_rsp.get()
@@ -323,8 +338,8 @@ class CoreMiniAxiBoard(Board):
         self._delegate = None
 
 class CoreMiniAxiSession(Session):
-    def __init__(self, dut, q, q_rsp, notify_cb):
-        super().__init__(None)
+    def __init__(self, dut, q, q_rsp, notify_cb, options=None):
+        super().__init__(None, options=options)
         self._probe = CoreMiniAxiProbe(self)
         self._board = CoreMiniAxiBoard(self, dut, q, q_rsp)
         self._q = q
@@ -348,13 +363,21 @@ class CoreMiniAxiGDBServer(object):
     async def run(self, elf, gdb_commands):
         entry_point = await self.core_mini_axi.load_elf(elf)
 
+        # Get random free ports for GDB server and Telnet
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s_gdb, \
+             socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s_telnet:
+            s_gdb.bind(('', 0))
+            s_telnet.bind(('', 0))
+            gdb_port = s_gdb.getsockname()[1]
+            telnet_port = s_telnet.getsockname()[1]
+
         def exec_gdb():
             with tempfile.NamedTemporaryFile(mode='w+') as cmdfile:
                 r = runfiles.Create()
                 gdb_path = r.Rlocation("coralnpu_hw/toolchain/gdb")
                 cmds_pre = [
                     'set architecture riscv:rv32',
-                    'target remote :3333',
+                    f'target remote :{gdb_port}',
                 ]
                 cmds_post = [
                     'quit',
@@ -378,7 +401,10 @@ class CoreMiniAxiGDBServer(object):
 
         gdbserver_queue = queue.Queue()
         gdbserver_queue_rsp = queue.Queue()
-        session = CoreMiniAxiSession(self.core_mini_axi, gdbserver_queue, gdbserver_queue_rsp, notify_cb)
+        session = CoreMiniAxiSession(self.core_mini_axi, gdbserver_queue, gdbserver_queue_rsp, notify_cb, options={
+            'gdbserver_port': gdb_port,
+            'telnet_port': telnet_port,
+        })
         session.open()
         gdb_server = GDBServer(session=session)
         gdb_server.start()
@@ -407,8 +433,51 @@ class CoreMiniAxiGDBServer(object):
                 await self.core_mini_axi.dm_wait_for_halted()
                 gdbserver_queue_rsp.put(True)
             if t == CoreMiniAxiDebugOps.READ_MEMORY_BLOCK8:
-                data = await self.core_mini_axi.read(kwargs['addr'], kwargs['size'])
-                gdbserver_queue_rsp.put(data)
+                addr = kwargs['addr']
+                size = kwargs['size']
+                read_data = bytearray()
+                current_addr = addr
+                remaining_size = size
+
+                while remaining_size > 0:
+                    access_size = 1
+                    if (current_addr % 4 == 0) and (remaining_size >= 4):
+                        access_size = 4
+                    elif (current_addr % 2 == 0) and (remaining_size >= 2):
+                        access_size = 2
+
+                    val = await self.core_mini_axi.dm_read_mem(current_addr, access_size)
+                    val = val & ((1 << (access_size * 8)) - 1)
+                    read_data.extend(val.to_bytes(access_size, 'little'))
+
+                    current_addr += access_size
+                    remaining_size -= access_size
+
+                gdbserver_queue_rsp.put(bytes(read_data))
+            if t == CoreMiniAxiDebugOps.WRITE_MEMORY_BLOCK8:
+                addr = kwargs['addr']
+                data = kwargs['data'] # data is a bytes object
+                current_addr = addr
+                current_data_idx = 0
+                remaining_size = len(data)
+
+                while remaining_size > 0:
+                    access_size = 1
+                    if (current_addr % 4 == 0) and (remaining_size >= 4):
+                        access_size = 4
+                    elif (current_addr % 2 == 0) and (remaining_size >= 2):
+                        access_size = 2
+
+                    chunk = data[current_data_idx : current_data_idx + access_size]
+                    val = int.from_bytes(chunk, 'little')
+
+                    await self.core_mini_axi.dm_write_mem(current_addr, val, access_size)
+
+                    current_addr += access_size
+                    current_data_idx += access_size
+                    remaining_size -= access_size
+
+                gdbserver_queue_rsp.put(True)
             if t == CoreMiniAxiDebugOps.READ_REG:
                 data = await self.core_mini_axi.dm_read_reg(kwargs['addr'])
                 gdbserver_queue_rsp.put(data)

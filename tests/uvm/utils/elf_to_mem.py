@@ -111,12 +111,15 @@ def main():
     itcm_segments = []
     dtcm_segments = []
     tohost_addr = None
+    entry_point = None
     run_opts_file = os.path.join(args.out_dir, 'elf_run_opts.f')
 
     try:
         with open(args.elf_file, 'rb') as f:
             elf = ELFFile(f)
             tohost_addr = find_tohost_addr(elf)
+            entry_point = elf.header['e_entry']
+            logging.info("Entry point found: 0x%08x", entry_point)
 
             for segment in elf.iter_segments():
                 if segment['p_type'] != 'PT_LOAD':
@@ -160,6 +163,8 @@ def main():
                          f"{os.path.join(args.out_dir, MEM_MAP['dtcm']['file'])}\n")
         if tohost_addr is not None:
             f_args.write(f"+TOHOST_ADDR='h{tohost_addr:08x}\n")
+        if entry_point is not None:
+            f_args.write(f"+ENTRY_POINT='h{entry_point:08x}\n")
 
     logging.info("Successfully generated memory and argument files.")
 

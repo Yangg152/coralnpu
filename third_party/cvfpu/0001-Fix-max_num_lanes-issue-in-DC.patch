@@ -8,10 +8,10 @@ Subject: [PATCH] Fix max_num_lanes issue in DC
  1 file changed, 13 insertions(+), 1 deletion(-)
 
 diff --git a/src/fpnew_pkg.sv b/src/fpnew_pkg.sv
-index 7addc3e..12eec6b 100644
+index 0167305..b3edf0e 100644
 --- a/src/fpnew_pkg.sv
 +++ b/src/fpnew_pkg.sv
-@@ -393,7 +393,19 @@ package fpnew_pkg;
+@@ -403,7 +403,19 @@ package fpnew_pkg;
  
    // Returns the maximum number of lanes in the FPU according to width, format config and vectors
    function automatic int unsigned max_num_lanes(int unsigned width, fmt_logic_t cfg, logic vec);
@@ -31,7 +31,6 @@ index 7addc3e..12eec6b 100644
 +    end
    endfunction
  
-   // Returns a mask of active FP formats that are present in lane lane_no of a multiformat slice
+     // Returns the maximum number of lanes in the FPU according to width, format config and vectors
 -- 
 2.49.0.604.gff1f9ca942-goog
-

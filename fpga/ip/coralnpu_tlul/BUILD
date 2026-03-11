@@ -14,6 +14,13 @@
 
 package(default_visibility = ["//visibility:public"])
 
+load("@rules_hdl//verilog:providers.bzl", "verilog_library")
+
+verilog_library(
+    name = "coralnpu_tlul",
+    srcs = glob(["*.sv"]),
+)
+
 filegroup(
     name = "rtl_files",
     srcs = glob([

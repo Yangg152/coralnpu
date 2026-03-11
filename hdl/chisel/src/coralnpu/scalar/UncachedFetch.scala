@@ -72,7 +72,7 @@ class Fetcher(p: Parameters) extends Module {
 
 class FetchControl(p: Parameters) extends Module {
     val io = IO(new Bundle {
-        val fetchFault = Bool()
+        val fetchFault = Valid(UInt(32.W))
         val csr = new CsrInIO(p)
         val iflush = Input(Valid(UInt(32.W)))
         val branch = Input(Valid(UInt(p.fetchAddrBits.W)))
@@ -160,15 +160,15 @@ class FetchControl(p: Parameters) extends Module {
 
     // If we have faulted we should stop making any new attempts until a branch resolves it.
     val faulted = RegInit(false.B)
-    val fetchFault = (faulted || (io.fetchData.valid && io.fetchData.bits.fault)) &&
+    val fetchFaultValid = (faulted || (io.fetchData.valid && io.fetchData.bits.fault)) &&
         !io.branch.valid
-    io.fetchFault := fetchFault
-    faulted := fetchFault
+    io.fetchFault := MakeValid(fetchFaultValid, io.fetchData.bits.addr)
+    faulted := fetchFaultValid
 
     // Send out results. All branch or flush, current or past, will make us
     // discard results.
     // TODO(davidgao): ForceZero it when invalid?
-    val writeToBuffer = io.fetchData.valid && !fetchFault && !ongoingBranchOrFlush
+    val writeToBuffer = io.fetchData.valid && !fetchFaultValid && !ongoingBranchOrFlush
     val nValid = Mux(writeToBuffer, predecode.count, 0.U)
     io.bufferRequest.nValid := nValid
 
@@ -195,7 +195,7 @@ class FetchControl(p: Parameters) extends Module {
                         io.fetchData.valid || // Wait one cycle for next fetch.
                         currentBranchOrFlush ||
                         insufficientBuffer ||
-                        fetchFault
+                        fetchFaultValid
     val fetch = ForceZero(MakeValid(!blockNewFetch, pc.bits))
 
     // All branch or flush are cleared once we're able to initiate a new fetch.
@@ -216,7 +216,12 @@ class UncachedFetch(p: Parameters) extends FetchUnit(p) {
   val ctrl = Module(new FetchControl(p))
   ctrl.io.csr <> io.csr
   ctrl.io.branch := branch
-  ctrl.io.iflush := MakeValid(io.iflush.valid, io.iflush.pcNext)
+  val debug_iflush = Seq(
+    io.debug_pc.valid -> MakeValid(io.debug_pc.bits),
+  )
+  ctrl.io.iflush := MuxCase(MakeInvalid(UInt(p.fetchAddrBits.W)), Seq(
+    io.iflush.valid -> MakeValid(io.iflush.pcNext),
+  ) ++ debug_iflush)
   ctrl.io.linkPort := io.linkPort
   // TODO(derekjchow): Maybe do something with back pressure?
   io.iflush.ready := true.B
@@ -231,7 +236,7 @@ class UncachedFetch(p: Parameters) extends FetchUnit(p) {
       new FetchInstruction(p), p.fetchInstrSlots, window))
   instructionBuffer.io.feedIn <> ctrl.io.bufferRequest
   io.inst.lanes <> instructionBuffer.io.out.take(4)
-  instructionBuffer.io.flush := io.iflush.valid || branch.valid
+  instructionBuffer.io.flush := io.iflush.valid || branch.valid || io.debug_pc.valid
   ctrl.io.bufferSpaces := instructionBuffer.io.nSpace
 
   val pc = RegInit(0.U(p.fetchAddrBits.W))

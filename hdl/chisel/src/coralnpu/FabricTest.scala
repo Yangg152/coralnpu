@@ -45,7 +45,7 @@ class FabricArbiterSpec extends AnyFreeSpec with ChiselSim {
         }
 
         // Check read command is accurate
-        dut.io.fabricBusy.expect(1)
+        dut.io.fabricBusy(1).expect(1)
         dut.io.port.readDataAddr.valid.expect(1)
         dut.io.port.writeDataAddr.valid.expect(0)
         dut.io.port.readDataAddr.bits.expect(0x8080)
@@ -87,7 +87,7 @@ class FabricArbiterSpec extends AnyFreeSpec with ChiselSim {
         }
 
         // Check write command is accurate
-        dut.io.fabricBusy.expect(1)
+        dut.io.fabricBusy(1).expect(1)
         dut.io.port.readDataAddr.valid.expect(0)
         dut.io.port.writeDataAddr.valid.expect(1)
         dut.io.port.writeDataAddr.bits.expect(0x80B0)
@@ -106,7 +106,7 @@ class FabricArbiterSpec extends AnyFreeSpec with ChiselSim {
       dut.io.source(1).readDataAddr.bits.poke(0x40B0.U)
       dut.io.source(1).writeDataAddr.valid.poke(false.B)
 
-      dut.io.fabricBusy.expect(0)
+      dut.io.fabricBusy(1).expect(0)
       dut.io.port.readDataAddr.valid.expect(1)
       dut.io.port.readDataAddr.bits.expect(0x40B0)
       dut.io.port.writeDataAddr.valid.expect(0)
@@ -131,7 +131,7 @@ class FabricArbiterSpec extends AnyFreeSpec with ChiselSim {
       dut.io.source(1).writeDataBits.poke(0xA0B0.U)
       dut.io.source(1).writeDataStrb.poke(0xA.U)
 
-      dut.io.fabricBusy.expect(0)
+      dut.io.fabricBusy(1).expect(0)
       dut.io.port.readDataAddr.valid.expect(0)
       dut.io.port.writeDataAddr.valid.expect(1)
       dut.io.port.writeDataAddr.bits.expect(0xB0B0)
@@ -145,9 +145,65 @@ class FabricArbiterSpec extends AnyFreeSpec with ChiselSim {
       dut.io.source(1).readDataAddr.valid.poke(false.B)
       dut.io.source(1).writeDataAddr.valid.poke(false.B)
 
-      dut.io.fabricBusy.expect(0)
+      dut.io.fabricBusy(1).expect(0)
       dut.io.port.readDataAddr.valid.expect(0)
       dut.io.port.writeDataAddr.valid.expect(0)
+    }
+  }
+
+  "3-Port Arbiter Priority" in {
+    simulate(new FabricArbiter(p, n = 3)) { dut =>
+      // Case 0: No inputs
+      for (i <- 0 until 3) {
+        dut.io.source(i).readDataAddr.valid.poke(false.B)
+        dut.io.source(i).writeDataAddr.valid.poke(false.B)
+      }
+      dut.io.fabricBusy(0).expect(0)
+      dut.io.fabricBusy(1).expect(0)
+      dut.io.fabricBusy(2).expect(0)
+      dut.io.port.readDataAddr.valid.expect(0)
+
+      // Case 1: Port 2 only (lowest priority)
+      dut.io.source(2).readDataAddr.valid.poke(true.B)
+      dut.io.source(2).readDataAddr.bits.poke(0x2000.U)
+
+      dut.io.fabricBusy(0).expect(0)
+      dut.io.fabricBusy(1).expect(0)
+      dut.io.fabricBusy(2).expect(0) // No one higher is busy
+      dut.io.port.readDataAddr.valid.expect(1)
+      dut.io.port.readDataAddr.bits.expect(0x2000.U)
+
+      // Case 2: Port 1 and Port 2 (Port 1 wins)
+      dut.io.source(1).readDataAddr.valid.poke(true.B)
+      dut.io.source(1).readDataAddr.bits.poke(0x1000.U)
+
+      dut.io.fabricBusy(0).expect(0)
+      dut.io.fabricBusy(1).expect(0) // No one higher is busy
+      dut.io.fabricBusy(2).expect(1) // Port 1 is busy
+      dut.io.port.readDataAddr.valid.expect(1)
+      dut.io.port.readDataAddr.bits.expect(0x1000.U)
+
+      // Case 3: Port 0, 1, 2 (Port 0 wins)
+      dut.io.source(0).readDataAddr.valid.poke(true.B)
+      dut.io.source(0).readDataAddr.bits.poke(0x0000.U)
+
+      dut.io.fabricBusy(0).expect(0) // Highest priority
+      dut.io.fabricBusy(1).expect(1) // Port 0 is busy
+      dut.io.fabricBusy(2).expect(1) // Port 0 is busy
+      dut.io.port.readDataAddr.valid.expect(1)
+      dut.io.port.readDataAddr.bits.expect(0x0000.U)
+
+      // Broadcast response check
+      dut.clock.step()
+      dut.io.port.readData.valid.poke(true.B)
+      dut.io.port.readData.bits.poke(0xDEADBEEFL.U)
+
+      dut.io.source(0).readData.valid.expect(1)
+      dut.io.source(0).readData.bits.expect(0xDEADBEEFL.U)
+      dut.io.source(1).readData.valid.expect(1)
+      dut.io.source(1).readData.bits.expect(0xDEADBEEFL.U)
+      dut.io.source(2).readData.valid.expect(1)
+      dut.io.source(2).readData.bits.expect(0xDEADBEEFL.U)
     }
   }
 }

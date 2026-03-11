@@ -19,6 +19,7 @@ filesets:
   files_rtl:
     depend:
       - com.google.coralnpu:fpga:coralnpu_soc
+      - pulp-platform:riscv-dbg:0.1
       - xilinx:virtual:ddr4_0
     files:
       - rtl/chip_nexus.sv
@@ -57,6 +58,11 @@ parameters:
     description: "Use Xilinx FPGA primitives"
     default: false
     paramtype: vlogdefine
+  TB_SUPPORT:
+    datatype: bool
+    description: "Enable TB support in RVV"
+    default: true
+    paramtype: vlogdefine
 
 targets:
   default: &default_target
@@ -73,6 +79,7 @@ targets:
       - MemInitFile
       - USE_GENERIC=true
       - FPGA_XILINX=true
+      - TB_SUPPORT=true
     tools:
       vivado:
       part: "xczu9eg-ffvb1156-1-e"

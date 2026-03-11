@@ -40,7 +40,6 @@ module rvv_backend
     
   `ifdef TB_SUPPORT
     rd_valid_rob2rt_o,
-    rd_rob2rt_o,
   `endif
 
     rvv_idle,
@@ -89,7 +88,6 @@ module rvv_backend
 // retire information
   `ifdef TB_SUPPORT
     output  logic     [`NUM_RT_UOP-1:0]               rd_valid_rob2rt_o;
-    output  ROB2RT_t  [`NUM_RT_UOP-1:0]               rd_rob2rt_o;
   `endif
 
 // rvv_backend is not active.(IDLE)
@@ -360,6 +358,11 @@ module rvv_backend
     logic                                 trap_ready_rob2rmp;   
     logic                                 trap_flush_rvv;
 
+  `ifdef TB_SUPPORT
+    // 32 VRF value.
+    logic    [`NUM_VRF-1:0][`VLEN-1:0]    vrf_data;
+  `endif
+
     genvar i;
 
 // ---code start------------------------------------------------------
@@ -369,6 +372,7 @@ module rvv_backend
         .M            (`ISSUE_LANE),
         .N            (`NUM_DE_INST),
         .DATAOUT_REG  (1'b1),
+        .ASYNC_RSTN   (1'b1),
         .DEPTH        (`CQ_DEPTH)
     ) u_command_queue (
       // global
@@ -437,6 +441,7 @@ module rvv_backend
         .T                (UOP_QUEUE_t),
         .M                (`NUM_DE_UOP),
         .N                (`NUM_DP_UOP),
+        .ASYNC_RSTN       (1'b1),
         .DEPTH            (`UQ_DEPTH)
     ) u_uop_queue (
       // global
@@ -542,6 +547,7 @@ module rvv_backend
         .T            (ALU_RS_t),
         .M            (`NUM_DP_UOP),
         .N            (`NUM_ALU),
+        .ASYNC_RSTN   (1'b1),
         .DEPTH        (`ALU_RS_DEPTH),
         .CHAOS_PUSH   (1'b1),
         .DATAOUT_REG  (1'b1)
@@ -584,6 +590,7 @@ module rvv_backend
         .T                (PMT_RDT_RS_t),
         .M                (`NUM_DP_UOP),
         .N                (`NUM_PMTRDT),
+        .ASYNC_RSTN       (1'b1),
         .DEPTH            (`PMTRDT_RS_DEPTH),
         .CHAOS_PUSH       (1'b1),
         .DATAOUT_REG      (1'b1)
@@ -627,6 +634,7 @@ module rvv_backend
         .M              (`NUM_DP_UOP),
         .N              (`NUM_MUL),
         .DEPTH          (`MUL_RS_DEPTH),
+        .ASYNC_RSTN     (1'b1),
         .CHAOS_PUSH     (1'b1)
     ) u_mul_rs (
       // global
@@ -668,6 +676,7 @@ module rvv_backend
         .M              (`NUM_DP_UOP),
         .N              (`NUM_DIV),
         .DEPTH          (`DIV_RS_DEPTH),
+        .ASYNC_RSTN     (1'b1),
         .CHAOS_PUSH     (1'b1)
     ) u_div_rs (
       // global
@@ -745,6 +754,7 @@ module rvv_backend
         .M            (`NUM_DP_UOP),
         .N            (`NUM_LSU),
         .DEPTH        (`LSU_RS_DEPTH),
+        .ASYNC_RSTN   (1'b1),
         .CHAOS_PUSH   (1'b1)
     ) u_lsu_rs (
       // global
@@ -789,6 +799,7 @@ module rvv_backend
         .M            (`NUM_DP_UOP),
         .N            (`NUM_LSU),
         .DEPTH        (`LSU_RS_DEPTH),
+        .ASYNC_RSTN   (1'b1),
         .CHAOS_PUSH   (1'b1)
     ) u_lsu_map_info (
       // global
@@ -852,6 +863,7 @@ module rvv_backend
         .M            (`NUM_LSU),
         .N            (`NUM_LSU),
         .DEPTH        (`NUM_LSU*2),
+        .ASYNC_RSTN   (1'b1),
         .CHAOS_PUSH   (1'b1)
     ) u_lsu_res (
       // global
@@ -1068,34 +1080,36 @@ module rvv_backend
         .rt2vxsat_write_valid   (wr_vxsat_valid),
         .rt2vxsat_write_data    (wr_vxsat),
         .vxsat2rt_write_ready   (wr_vxsat_ready)
+      // Retire information for RVVI.
+      `ifdef TB_SUPPORT
+        ,.vrf_data              (vrf_data),
+        .rt2rvvi_valid          (rd_valid_rob2rt_o),
+        .rt2rvvi_data           (rd_rob2rt_o)
+      `endif        
     );
 
   // VRF, Vector Register File
     rvv_backend_vrf #(
     ) u_vrf (
       // global signal
-        .clk             (clk),
-        .rst_n           (rst_n),
+        .clk              (clk),
+        .rst_n            (rst_n),
       // DP to VRF
-        .dp2vrf_rd_index (rd_index_dp2vrf),
+        .dp2vrf_rd_index  (rd_index_dp2vrf),
       // VRF to DP
-        .vrf2dp_rd_data  (rd_data_vrf2dp),
-        .vrf2dp_v0_data  (v0_mask_vrf2dp),
+        .vrf2dp_rd_data   (rd_data_vrf2dp),
+        .vrf2dp_v0_data   (v0_mask_vrf2dp),
       // RT to VRF
-        .rt2vrf_wr_valid (wr_valid_rt2vrf),
-        .rt2vrf_wr_data  (wr_data_rt2vrf)
+      `ifdef TB_SUPPORT
+        .vrf_data         (vrf_data),
+      `endif
+        .rt2vrf_wr_valid  (wr_valid_rt2vrf),
+        .rt2vrf_wr_data   (wr_data_rt2vrf)
     );
 
-  // retire information
-`ifdef TB_SUPPORT
-  assign rd_valid_rob2rt_o = rd_valid_rob2rt & rd_ready_rt2rob;
-  assign rd_rob2rt_o       = rd_rob2rt;
-`endif
-
-  // rvv_backend IDLE
+  // rvv_backend IDLE 
   assign rvv_idle = fifo_empty_cq2de&uq_empty&rob_empty;
-  assign rd_rob2rt_o = rd_rob2rt;
-
+  
 `endif // TB_BRINGUP
 
 endmodule

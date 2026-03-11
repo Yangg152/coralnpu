@@ -39,12 +39,18 @@ class CoralNPUV2SimulatorPy {
                    std::optional<uint32_t> entry_point = std::nullopt);
   void Run();
   void Wait();
+  void Halt();
+  void SetSwBreakpoint(uint64_t address);
+  void ClearSwBreakpoint(uint64_t address);
   int Step(const int num_steps);
   uint64_t GetCycleCount();
   uint64_t ReadRegister(const std::string& name);
+  void WriteRegister(const std::string& name, uint64_t value);
   py::array_t<uint8_t> ReadMemory(uint64_t address, size_t length);
   void WriteMemory(uint64_t address, py::array_t<uint8_t> input_buffer,
                    size_t length);
+  void WriteWord(uint64_t address, uint32_t data);
+  void WritePtr(uint64_t address, uint64_t ptr_address);
 
  private:
   coralnpu::sim::CoralNPUV2Simulator sim_;
@@ -52,7 +58,6 @@ class CoralNPUV2SimulatorPy {
 
 void CoralNPUV2SimulatorPy::LoadProgram(const std::string& elf_file_path,
                                         std::optional<uint32_t> entry_point) {
-  LOG(INFO) << "Calling LoadProgram...";
   absl::Status status = sim_.LoadProgram(elf_file_path, entry_point);
   if (!status.ok()) {
     LOG(ERROR) << "LoadProgram failed: " << status;
@@ -61,7 +66,6 @@ void CoralNPUV2SimulatorPy::LoadProgram(const std::string& elf_file_path,
 }
 
 void CoralNPUV2SimulatorPy::Run() {
-  LOG(INFO) << "Calling Run...";
   absl::Status status = sim_.Run();
   if (!status.ok()) {
     LOG(ERROR) << "Run failed: " << status;
@@ -70,10 +74,33 @@ void CoralNPUV2SimulatorPy::Run() {
 }
 
 void CoralNPUV2SimulatorPy::Wait() {
-  LOG(INFO) << "Calling Wait...";
   absl::Status status = sim_.Wait();
   if (!status.ok()) {
     LOG(ERROR) << "Wait failed: " << status;
+    return;
+  }
+}
+
+void CoralNPUV2SimulatorPy::Halt() {
+  absl::Status status = sim_.Halt();
+  if (!status.ok()) {
+    LOG(ERROR) << "Halt failed: " << status;
+    return;
+  }
+}
+
+void CoralNPUV2SimulatorPy::SetSwBreakpoint(uint64_t address) {
+  absl::Status status = sim_.SetSwBreakpoint(address);
+  if (!status.ok()) {
+    LOG(ERROR) << "SetSwBreakpoint failed: " << status;
+    return;
+  }
+}
+
+void CoralNPUV2SimulatorPy::ClearSwBreakpoint(uint64_t address) {
+  absl::Status status = sim_.ClearSwBreakpoint(address);
+  if (!status.ok()) {
+    LOG(ERROR) << "ClearSwBreakpoint failed: " << status;
     return;
   }
 }
@@ -103,6 +130,15 @@ uint64_t CoralNPUV2SimulatorPy::ReadRegister(const std::string& name) {
   return word_status.value();
 }
 
+void CoralNPUV2SimulatorPy::WriteRegister(const std::string& name,
+                                          uint64_t value) {
+  absl::Status status = sim_.WriteRegister(name, value);
+  if (!status.ok()) {
+    LOG(ERROR) << "WriteRegister failed: " << status;
+    return;
+  }
+}
+
 void CoralNPUV2SimulatorPy::WriteMemory(uint64_t address,
                                         py::array_t<uint8_t> input_buffer,
                                         size_t length) {
@@ -117,6 +153,29 @@ void CoralNPUV2SimulatorPy::WriteMemory(uint64_t address,
   if (write_status.value() != length) {
     LOG(ERROR) << "Write memory length assertion error: "
                << write_status.value() << " written out of" << length;
+  }
+}
+
+void CoralNPUV2SimulatorPy::WriteWord(uint64_t address, uint32_t data) {
+  absl::StatusOr<size_t> write_status = sim_.WriteMemory(address, &data, 4);
+  if (!write_status.ok()) {
+    LOG(ERROR) << "Write memory failed: " << write_status;
+  }
+  if (write_status.value() != 4) {
+    LOG(ERROR) << "Write memory length assertion error: "
+               << write_status.value() << " written out of" << 4;
+  }
+}
+
+void CoralNPUV2SimulatorPy::WritePtr(uint64_t address, uint64_t ptr_address) {
+  absl::StatusOr<size_t> write_status =
+      sim_.WriteMemory(address, &ptr_address, 8);
+  if (!write_status.ok()) {
+    LOG(ERROR) << "Write memory failed: " << write_status;
+  }
+  if (write_status.value() != 8) {
+    LOG(ERROR) << "Write memory length assertion error: "
+               << write_status.value() << " written out of" << 8;
   }
 }
 
@@ -159,7 +218,9 @@ PYBIND11_MODULE(coralnpu_v2_sim_pybind, module) {
       .def_readwrite("lsu_access_ranges",
                      &CoralNPUV2SimulatorOptions::lsu_access_ranges)
       .def_readwrite("exit_on_ebreak",
-                     &CoralNPUV2SimulatorOptions::exit_on_ebreak);
+                     &CoralNPUV2SimulatorOptions::exit_on_ebreak)
+      .def_readwrite("semihost_htif",
+                     &CoralNPUV2SimulatorOptions::semihost_htif);
 
   py::class_<CoralNPUV2SimulatorPy>(module, "CoralNPUV2SimulatorPy")
       .def(py::init<const CoralNPUV2SimulatorOptions>())
@@ -168,6 +229,11 @@ PYBIND11_MODULE(coralnpu_v2_sim_pybind, module) {
       .def("Run", &CoralNPUV2SimulatorPy::Run, "runs the program")
       .def("Wait", &CoralNPUV2SimulatorPy::Wait,
            "waits for the program to finish")
+      .def("Halt", &CoralNPUV2SimulatorPy::Halt, "Halt the simulator")
+      .def("SetSwBreakpoint", &CoralNPUV2SimulatorPy::SetSwBreakpoint,
+           py::arg("address"), "Set a software breakpoint at address")
+      .def("ClearSwBreakpoint", &CoralNPUV2SimulatorPy::ClearSwBreakpoint,
+           py::arg("address"), "Clear a software breakpoint at address")
       .def("Step", &CoralNPUV2SimulatorPy::Step, py::arg("num_steps"),
            "Runs a simulator to a specifed number of steps")
       .def("GetCycleCount", &CoralNPUV2SimulatorPy::GetCycleCount,
@@ -175,6 +241,10 @@ PYBIND11_MODULE(coralnpu_v2_sim_pybind, module) {
       .def("ReadMemory", &CoralNPUV2SimulatorPy::ReadMemory,
            "Reads memory and stores in the given buffer")
       .def("WriteMemory", &CoralNPUV2SimulatorPy::WriteMemory, "Write memory")
+      .def("WriteWord", &CoralNPUV2SimulatorPy::WriteWord, "Write word")
+      .def("WritePtr", &CoralNPUV2SimulatorPy::WritePtr, "Write ptr")
       .def("ReadRegister", &CoralNPUV2SimulatorPy::ReadRegister,
+           "Read Register and returns the value in it")
+      .def("WriteRegister", &CoralNPUV2SimulatorPy::WriteRegister,
            "Read Register and returns the value in it");
 }

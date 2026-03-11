@@ -17,6 +17,10 @@
 // Description: Defines a transaction item for RV32 Zifencei instructions.
 //----------------------------------------------------------------------------
 class coralnpu_rv32zifencei_transaction extends coralnpu_rvvi_decode_transaction;
+<<<<<<< HEAD:tests/uvm/common/rvvi_agent/coralnpu_rv32zifencei_transaction.sv
+=======
+
+>>>>>>> 07fae9c (VSI-update i,m,zbb,zifencei,cov and transaction):tests/uvm/common/coralnpu_rvvi_agent/coralnpu_rv32zifencei_transaction.sv
   logic[11:0] funct12;
   fencei_e inst_name;
 
@@ -25,8 +29,16 @@ class coralnpu_rv32zifencei_transaction extends coralnpu_rvvi_decode_transaction
         `uvm_field_enum (fencei_e,inst_name, UVM_DEFAULT)
   `uvm_object_utils_end
 
+<<<<<<< HEAD:tests/uvm/common/rvvi_agent/coralnpu_rv32zifencei_transaction.sv
   function new (string name = "coralnpu_rv32zifencei_transaction");
     super.new(name);
   endfunction : new
 
 endclass : coralnpu_rv32zifencei_transaction
+=======
+  function new(string name = "coralnpu_rv32zifencei_transaction");
+    super.new(name);
+  endfunction:new
+
+endclass:coralnpu_rv32zifencei_transaction
+>>>>>>> 07fae9c (VSI-update i,m,zbb,zifencei,cov and transaction):tests/uvm/common/coralnpu_rvvi_agent/coralnpu_rv32zifencei_transaction.sv

@@ -22,10 +22,10 @@ load("@bazel_tools//tools/build_defs/repo:utils.bzl", "maybe")
 def coralnpu_repos():
     http_archive(
         name = "bazel_skylib",
-        sha256 = "b8a1527901774180afc798aeb28c4634bdccf19c4d98e7bdd1ce79d1fe9aaad7",
+        sha256 = "3b5b49006181f5f8ff626ef8ddceaa95e9bb8ad294f7b5d7b11ea9f7ddaf8c59",
         urls = [
-            "https://mirror.bazel.build/github.com/bazelbuild/bazel-skylib/releases/download/1.4.1/bazel-skylib-1.4.1.tar.gz",
-            "https://github.com/bazelbuild/bazel-skylib/releases/download/1.4.1/bazel-skylib-1.4.1.tar.gz",
+            "https://mirror.bazel.build/github.com/bazelbuild/bazel-skylib/releases/download/1.9.0/bazel-skylib-1.9.0.tar.gz",
+            "https://github.com/bazelbuild/bazel-skylib/releases/download/1.9.0/bazel-skylib-1.9.0.tar.gz",
         ],
     )
 
@@ -38,15 +38,26 @@ def coralnpu_repos():
 
     http_archive(
         name = "rules_java",
-        urls = ["https://github.com/bazelbuild/rules_java/archive/981f06c3d2bd10225e85209904090eb7b5fb26bd.zip"],
-        sha256 = "7979ece89e82546b0dcd1dff7538c34b5a6ebc9148971106f0e3705444f00665",
-        strip_prefix = "rules_java-981f06c3d2bd10225e85209904090eb7b5fb26bd",
+        urls = [
+            "https://github.com/bazelbuild/rules_java/releases/download/7.12.5/rules_java-7.12.5.tar.gz",
+        ],
+        sha256 = "17b18cb4f92ab7b94aa343ce78531b73960b1bed2ba166e5b02c9fdf0b0ac270",
+    )
+
+    http_archive(
+        name = "com_google_protobuf",
+        strip_prefix = "protobuf-29.6",
+        sha256 = "877bf9f880631aa31daf2c09896276985696728137fcd43cc534a28c5566d9ba",
+        url = "https://github.com/protocolbuffers/protobuf/releases/download/v29.6/protobuf-29.6.tar.gz",
     )
 
     http_archive(
         name = "rules_pkg",
-        urls = ["https://mirror.bazel.build/github.com/bazelbuild/rules_pkg/releases/download/0.7.0/rules_pkg-0.7.0.tar.gz", "https://github.com/bazelbuild/rules_pkg/releases/download/0.7.0/rules_pkg-0.7.0.tar.gz"],
-        sha256 = "8a298e832762eda1830597d64fe7db58178aa84cd5926d76d5b744d6558941c2",
+        urls = [
+            "https://mirror.bazel.build/github.com/bazelbuild/rules_pkg/releases/download/1.2.0/rules_pkg-1.2.0.tar.gz",
+            "https://github.com/bazelbuild/rules_pkg/releases/download/1.2.0/rules_pkg-1.2.0.tar.gz",
+        ],
+        sha256 = "b5c9184a23bb0bcff241981fd9d9e2a97638a1374c9953bb1808836ce711f990",
     )
 
     http_archive(
@@ -58,9 +69,9 @@ def coralnpu_repos():
 
     http_archive(
         name = "rules_python",
-        sha256 = "9d04041ac92a0985e344235f5d946f71ac543f1b1565f2cdbc9a2aaee8adf55b",
-        strip_prefix = "rules_python-0.26.0",
-        url = "https://github.com/bazelbuild/rules_python/archive/refs/tags/0.26.0.tar.gz",
+        sha256 = "690e0141724abb568267e003c7b6d9a54925df40c275a870a4d934161dc9dd53",
+        strip_prefix = "rules_python-0.40.0",
+        url = "https://github.com/bazelbuild/rules_python/releases/download/0.40.0/rules_python-0.40.0.tar.gz",
         patches = ["@coralnpu_hw//rules:rules_python_airgap.patch"],
         patch_args = ["-p0"],
     )
@@ -96,25 +107,23 @@ def coralnpu_repos2():
             "https://github.com/hdl/bazel_rules_hdl/archive/7a1ba0e8d229200b4628e8a676917fc6b8e165d1.tar.gz",
         ],
         patches = [
-            "@coralnpu_hw//external:0001-Use-systemc-in-verilator-and-support-verilator-in-co.patch",
-            "@coralnpu_hw//external:0002-Update-cocotb-script-to-support-newer-version.patch",
-            "@coralnpu_hw//external:0003-Export-vdb-via-undeclared-test-outputs.patch",
-            "@coralnpu_hw//external:0004-More-jobs-for-cocotb.patch",
-            "@coralnpu_hw//external:0005-Use-num_failed-for-exit-code.patch",
-            "@coralnpu_hw//external:0006-Separate-build-from-test-for-Verilator.patch",
-            "@coralnpu_hw//external:0007-Suppress-skywater-pdk-loading.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0001-Use-systemc-in-verilator-and-support-verilator-in-co.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0002-Update-cocotb-script-to-support-newer-version.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0003-Export-vdb-via-undeclared-test-outputs.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0004-More-jobs-for-cocotb.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0005-Use-num_failed-for-exit-code.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0006-Separate-build-from-test-for-Verilator.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0007-Suppress-skywater-pdk-loading.patch",
+            "@coralnpu_hw//third_party/rules_hdl:0008-Use-glob-for-verilator_bin-data-files.patch",
         ],
         patch_args = ["-p1"],
     )
 
-    # See https://github.com/bazelbuild/rules_scala/releases for up to date version information.
-    rules_scala_version = "73719cbf88134d5c505daf6c913fe4baefd46917"
     http_archive(
         name = "io_bazel_rules_scala",
-        sha256 = "48124dfd3387c72fd13d3d954b246a5c34eb83646c0c04a727c9a1ba98e876a6",
-        strip_prefix = "rules_scala-%s" % rules_scala_version,
-        type = "zip",
-        url = "https://github.com/bazelbuild/rules_scala/archive/%s.zip" % rules_scala_version,
+        sha256 = "e734eef95cf26c0171566bdc24d83bd82bdaf8ca7873bec6ce9b0d524bdaf05d",
+        strip_prefix = "rules_scala-6.6.0",
+        url = "https://github.com/bazelbuild/rules_scala/releases/download/v6.6.0/rules_scala-v6.6.0.tar.gz",
     )
 
     http_archive(
@@ -160,6 +169,19 @@ exports_files(["diplomacy/src/diplomacy/nodes/HeterogeneousBag.scala"])
     )
 
     http_archive(
+        name = "srecord",
+        urls = ["https://sourceforge.net/projects/srecord/files/srecord/1.65/srecord-1.65.0-Source.tar.gz/download"],
+        type = "tar.gz",
+        sha256 = "81c3d07cf15ce50441f43a82cefd0ac32767c535b5291bcc41bd2311d1337644",
+        strip_prefix = "srecord-1.65.0-Source",
+        build_file = "@coralnpu_hw//third_party/srecord:srecord.BUILD",
+        patches = [
+            "@coralnpu_hw//third_party/srecord:0001-Disable-docs-and-tests.patch",
+        ],
+        patch_args = ["-p1"],
+    )
+
+    http_archive(
         name = "riscv-tests",
         urls = ["https://github.com/riscv-software-src/riscv-tests/archive/fd4e6cdd033d9075632be9dd207c848181ca474c.zip"],
         sha256 = "e7d84eaa149b57c0e5ff69a76c80f35f4ee64c5dc985dbba5c287adf8b56ec5d",
@@ -183,10 +205,10 @@ filegroup(
 def cvfpu_repos():
     http_archive(
         name = "cvfpu",
-        sha256 = "fe9278105886ed23ee889c58b2c28f89732e06a0d12f7fa4a8ce60dd680290f6",
-        urls = ["https://github.com/openhwgroup/cvfpu/archive/refs/tags/v0.8.1.zip"],
+        urls = ["https://github.com/openhwgroup/cvfpu/archive/58ca3c376beb914b2b80b811d4b270c063d4e6f7.zip"],
+        sha256 = "1c31ca538f7624fe0abf082d784553ed5afe0cf209f34c26209fa2f9c4878521",
         build_file = "@coralnpu_hw//third_party/cvfpu:BUILD.bazel",
-        strip_prefix = "cvfpu-0.8.1",
+        strip_prefix = "cvfpu-58ca3c376beb914b2b80b811d4b270c063d4e6f7",
         patches = [
             "@coralnpu_hw//third_party/cvfpu:0001-Fix-max_num_lanes-issue-in-DC.patch",
             "@coralnpu_hw//third_party/cvfpu:0002-Remove-SVH-includes.patch",
@@ -233,6 +255,7 @@ def fpga_repos():
         strip_prefix = "opentitan-0e3cf62211004443d6d29f8f6120882376da499a",
         patches = [
             "@coralnpu_hw//fpga:0001-Export-hw-ip_templates.patch",
+            "@coralnpu_hw//fpga:0002-Use-hermetic-verilator-in-fusesoc-build.patch",
         ],
         patch_args = ["-p1"],
     )
@@ -260,14 +283,18 @@ def tflite_repos():
 def mpact_repos():
     http_archive(
         name = "com_google_mpact-riscv",
-        sha256 = "01dac9ff9e7ca6a2666bf3c881f12cb146298925658e75fa351cddf06633fb0a",
-        strip_prefix = "mpact-riscv-336067a7ee0a91c2c180b35f3423d664d9045cc2",
-        url = "https://github.com/google/mpact-riscv/archive/336067a7ee0a91c2c180b35f3423d664d9045cc2.tar.gz",
+        sha256 = "b88d38251c716cd8cb6e9dbdd73161074924a3d40de18873d714eef98ad5529f",
+        strip_prefix = "mpact-riscv-cd69512240fb2957be2771aeb71fd994bac7b247",
+        url = "https://github.com/google/mpact-riscv/archive/cd69512240fb2957be2771aeb71fd994bac7b247.tar.gz",
+        patches = [
+            "@coralnpu_hw//third_party:mpact-riscv-openat.patch",
+        ],
+        patch_args = ["-p1"],
     )
 
     http_archive(
         name = "coralnpu_mpact",
-        urls = ["https://github.com/google-coral/coralnpu-mpact/archive/430a8d14ad766388ef546a6449bf3a14b3b3f233.tar.gz"],
-        sha256 = "c9a38cfcba293398fc18c2b735b1831ebc99315184667c87f4d995f4933b2814",
-        strip_prefix = "coralnpu-mpact-430a8d14ad766388ef546a6449bf3a14b3b3f233",
+        urls = ["https://github.com/google-coral/coralnpu-mpact/archive/a1d219efd49a36b8744af29df23ab06dd6c021c6.zip"],
+        sha256 = "23cf70ac2ca31f9c56fc140959298524d5db2f003fe4fdfe3552081048cbf934",
+        strip_prefix = "coralnpu-mpact-a1d219efd49a36b8744af29df23ab06dd6c021c6",
     )

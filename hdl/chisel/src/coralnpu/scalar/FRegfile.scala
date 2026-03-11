@@ -22,7 +22,7 @@ class FRegfile(p: Parameters, n_read: Int, n_write: Int) extends Module {
   val io = IO(new Bundle {
     val read_ports = Vec(n_read, new FRegfileRead)
     val write_ports = Vec(n_write, new FRegfileWrite)
-    val dm_write_valid = Option.when(p.useDebugModule)(Input(Bool()))
+    val dm_write_valid = Input(Bool())
 
     val scoreboard_set = Input(UInt(32.W))
     val scoreboard = Output(UInt(32.W))
@@ -42,7 +42,7 @@ class FRegfile(p: Parameters, n_read: Int, n_write: Int) extends Module {
   io.scoreboard := scoreboard
 
   val scoreboard_error = RegInit(false.B)
-  val dm_write_valid = io.dm_write_valid.getOrElse(false.B)
+  val dm_write_valid = io.dm_write_valid
   scoreboard_error := ((scoreboard & scoreboard_clr) =/= scoreboard_clr) && !dm_write_valid
   assert(!scoreboard_error)
 

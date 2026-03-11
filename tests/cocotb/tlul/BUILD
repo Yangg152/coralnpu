@@ -332,6 +332,8 @@ CORALNPU_XBAR_TESTCASES = [
     "test_test_host_32_to_coralnpu_device_csr_read",
     "test_test_host_32_to_coralnpu_device_specific_addr",
     "test_wide_to_narrow_integrity",
+    "test_16bit_writes_to_sram",
+    "test_interleaved_hosts_to_sram",
 ]
 # END_TESTCASES_FOR_coralnpu_xbar_cocotb
 
@@ -404,9 +406,10 @@ cocotb_test_suite(
 CORALNPU_CHISEL_SUBSYSTEM_TESTCASES = [
     "test_tlul_passthrough",
     "test_program_execution_via_host",
-    "test_program_execution_via_spi",
+    ("test_program_execution_via_spi", "large"),
     "test_ddr_access",
-    "test_ddr_access_via_spi",
+    ("test_ddr_access_via_spi", "large"),
+    "test_tlul_width_bridge_bug_reproduction",
 ]
 # END_TESTCASES_FOR_coralnpu_chisel_subsystem_cocotb
 
@@ -438,6 +441,64 @@ cocotb_test_suite(
     vcs_data = [
         "//tests/cocotb/rvv/arithmetics:rvv_add_int32_m1.elf",
     ],
+    vcs_build_args = VCS_BUILD_ARGS,
+    vcs_test_args = VCS_TEST_ARGS,
+    vcs_defines = VCS_DEFINES,
+)
+
+# BEGIN_TESTCASES_FOR_spi_master_cocotb
+SPI_MASTER_TESTCASES = [
+    "test_spi_master_basic_tx",
+]
+# END_TESTCASES_FOR_spi_master_cocotb
+
+cocotb_test_suite(
+    name = "spi_master_cocotb",
+    simulators = ["verilator", "vcs"],
+    testcases = SPI_MASTER_TESTCASES,
+    testcases_vname = "SPI_MASTER_TESTCASES",
+    tests_kwargs = {
+        "hdl_toplevel": "CoralNPUChiselSubsystemTestHarness",
+        "waves": True,
+        "seed": "42",
+        "test_module": ["test_spi_master.py"],
+        "deps": [
+            "//coralnpu_test_utils:TileLinkULInterface",
+        ],
+        "default_testcase_size": "small",
+        "size": "medium",
+    },
+    verilator_model = "//hdl/chisel/src/soc:coralnpu_chisel_subsystem_testharness_model",
+    vcs_verilog_sources = ["//hdl/chisel/src/soc:coralnpu_chisel_subsystem_testharness_cc_library_emit_verilog"],
+    vcs_build_args = VCS_BUILD_ARGS,
+    vcs_test_args = VCS_TEST_ARGS,
+    vcs_defines = VCS_DEFINES,
+)
+
+# BEGIN_TESTCASES_FOR_gpio_integration_cocotb
+GPIO_INTEGRATION_TESTCASES = [
+    "test_gpio_integration",
+]
+# END_TESTCASES_FOR_gpio_integration_cocotb
+
+cocotb_test_suite(
+    name = "gpio_integration_cocotb",
+    simulators = ["verilator", "vcs"],
+    testcases = GPIO_INTEGRATION_TESTCASES,
+    testcases_vname = "GPIO_INTEGRATION_TESTCASES",
+    tests_kwargs = {
+        "hdl_toplevel": "CoralNPUChiselSubsystemTestHarness",
+        "waves": True,
+        "seed": "42",
+        "test_module": ["test_gpio_integration.py"],
+        "deps": [
+            "//coralnpu_test_utils:TileLinkULInterface",
+        ],
+        "default_testcase_size": "small",
+        "size": "medium",
+    },
+    verilator_model = "//hdl/chisel/src/soc:coralnpu_chisel_subsystem_testharness_model",
+    vcs_verilog_sources = ["//hdl/chisel/src/soc:coralnpu_chisel_subsystem_testharness_cc_library_emit_verilog"],
     vcs_build_args = VCS_BUILD_ARGS,
     vcs_test_args = VCS_TEST_ARGS,
     vcs_defines = VCS_DEFINES,

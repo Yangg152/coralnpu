@@ -101,6 +101,7 @@ py_library(
     name = "ftdi_spi_master_lib",
     srcs = ["ftdi_spi_master.py"],
     deps = [
+        requirement("libusb_package"),
         requirement("pyftdi"),
         requirement("pyelftools"),
         ":spi_constants",
@@ -131,6 +132,7 @@ py_binary(
     deps = [
         ":ftdi_spi_master_lib",
         requirement("numpy"),
+        "//utils/coralnpu_soc_loader:spi_driver",
     ],
 )
 
@@ -147,6 +149,15 @@ py_binary(
     name = "rvv_cpp_util_header_generator",
     srcs = [
         "rvv_cpp_util_header_generator.py",
+    ],
+)
+
+py_binary(
+    name = "run_binary",
+    srcs = ["run_binary.py"],
+    deps = [
+        ":ftdi_spi_master_lib",
+        requirement("pyelftools"),
     ],
 )
 

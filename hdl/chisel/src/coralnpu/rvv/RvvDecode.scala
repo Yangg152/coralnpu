@@ -124,7 +124,8 @@ class RvvCompressedInstruction extends Bundle {
     // A vector instruction writes to a vector register if it's an ALU operation
     // or a load operation. Store operations do not write to a vector register.
     // vset* instructions write to a scalar register (rd), not a vector register.
-    opcode === RvvCompressedOpcode.RVVLOAD || (opcode === RvvCompressedOpcode.RVVALU && !isVset())
+    // Scalar-write instructions (vmv.x.s, vcpop, vfirst) also do not write vector registers.
+    opcode === RvvCompressedOpcode.RVVLOAD || (opcode === RvvCompressedOpcode.RVVALU && !writesRd())
   }
 
   override def toPrintable: Printable = {

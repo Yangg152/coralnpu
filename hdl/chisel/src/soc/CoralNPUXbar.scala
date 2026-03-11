@@ -15,7 +15,7 @@
 package coralnpu.soc
 
 import chisel3._
-import chisel3.util.{MixedVec, MuxCase}
+import chisel3.util.MuxCase
 import bus._
 import bus.TlulWidthBridge
 import coralnpu.Parameters
@@ -34,26 +34,19 @@ class CoralNPUXbarIO(val hostParams: Seq[bus.TLULParameters], val deviceParams: 
   val cfg = CrossbarConfig(itcmSize, dtcmSize)
 
   // --- Host (Master) Ports ---
-  val hosts = Flipped(MixedVec(hostParams.map(p => new OpenTitanTileLink.Host2Device(p))))
+  val hosts = Flipped(new TLBundleMap(cfg.hosts(enableTestHarness).map(_.name).zip(hostParams)))
 
   // --- Device (Slave) Ports ---
-  val devices = MixedVec(deviceParams.map(p => new OpenTitanTileLink.Host2Device(p)))
+  val devices = new TLBundleMap(cfg.devices.map(_.name).zip(deviceParams))
 
   // --- Dynamic Asynchronous Clock/Reset Ports ---
   // Find all unique clock domains from the config, excluding the main one.
   val asyncDeviceDomains = cfg.devices.map(_.clockDomain).distinct.filter(_ != "main")
   val asyncHostDomains = cfg.hosts(enableTestHarness).map(_.clockDomain).distinct.filter(_ != "main")
 
-  // Create a Vec of Bundles for clock and reset inputs for each async domain.
-  val async_ports_devices = Input(Vec(asyncDeviceDomains.length, new Bundle {
-    val clock = Clock()
-    val reset = AsyncReset()
-  }))
-
-  val async_ports_hosts = Input(Vec(asyncHostDomains.length, new Bundle {
-    val clock = Clock()
-    val reset = AsyncReset()
-  }))
+  // Create a DataRecord of ClockResetBundles for clock and reset inputs for each async domain.
+  val async_ports_devices = new DataRecord(asyncDeviceDomains.map(d => d -> new ClockResetBundle))
+  val async_ports_hosts = new DataRecord(asyncHostDomains.map(d => d -> new ClockResetBundle))
 }
 
 /**
@@ -80,8 +73,6 @@ class CoralNPUXbar(val hostParams: Seq[bus.TLULParameters], val deviceParams: Se
   // Find all unique clock domains from the config, excluding the main one.
   val asyncDeviceDomains = cfg.devices.map(_.clockDomain).distinct.filter(_ != "main")
   val asyncHostDomains = cfg.hosts(enableTestHarness).map(_.clockDomain).distinct.filter(_ != "main")
-  val asyncDeviceDomainMap = asyncDeviceDomains.zipWithIndex.toMap
-  val asyncHostDomainMap = asyncHostDomains.zipWithIndex.toMap
 
   // --- 1. Graph Analysis ---
   // Analyze the configuration to understand the connection topology. This will be
@@ -100,6 +91,7 @@ class CoralNPUXbar(val hostParams: Seq[bus.TLULParameters], val deviceParams: Se
   val commonParams = {
     val p = new Parameters
     p.lsuDataBits = 128
+    p.axi2IdBits = 8
     new bus.TLULParameters(p)
   }
   val commonWidth = 128
@@ -114,15 +106,15 @@ class CoralNPUXbar(val hostParams: Seq[bus.TLULParameters], val deviceParams: Se
     // A. Standardize Host Interfaces
     val hostInterfaces = cfg.hosts(enableTestHarness).map { host =>
       val hostId = hostMap(host.name)
-      var currentIface: bus.OpenTitanTileLink.Host2Device = io.hosts(hostId)
+      var currentIface: bus.OpenTitanTileLink.Host2Device = io.hosts(host.name)
 
       // Step 1: Clock Domain Crossing (if necessary)
       // Host-side FIFOs are at the host's native width. The FIFO output is in the main clock domain.
       if (host.clockDomain != "main") {
-        val domainIndex = asyncHostDomainMap(host.clockDomain)
-        val fifo = Module(new TlulFifoAsync(hostParams(hostId)))
-        fifo.io.clk_h_i := io.async_ports_hosts(domainIndex).clock
-        fifo.io.rst_h_i := io.async_ports_hosts(domainIndex).reset.asBool
+        val domainPorts = io.async_ports_hosts(host.clockDomain).asInstanceOf[ClockResetBundle]
+        val fifo = Module(new TlulFifoAsync(hostParams(hostId))).suggestName(s"${host.name}_fifo")
+        fifo.io.clk_h_i := domainPorts.clock
+        fifo.io.rst_h_i := domainPorts.reset.asBool
         fifo.io.clk_d_i := clock
         fifo.io.rst_d_i := reset.asBool
         fifo.io.tl_h <> currentIface
@@ -132,7 +124,7 @@ class CoralNPUXbar(val hostParams: Seq[bus.TLULParameters], val deviceParams: Se
       // Step 2: Width Conversion (if necessary)
       // All interfaces are brought up to the common bus width.
       if ((hostParams(hostId).w * 8) < commonWidth) {
-        val bridge = Module(new TlulWidthBridge(hostParams(hostId), commonParams))
+        val bridge = Module(new TlulWidthBridge(hostParams(hostId), commonParams)).suggestName(s"${host.name}_bridge")
         bridge.io.tl_h <> currentIface
         currentIface = bridge.io.tl_d
       }
@@ -152,12 +144,12 @@ class CoralNPUXbar(val hostParams: Seq[bus.TLULParameters], val deviceParams: Se
       // Step 1: Clock Domain Crossing (if necessary)
       // The FIFO input is at the common width and in the main clock domain.
       if (device.clockDomain != "main") {
-        val domainIndex = asyncDeviceDomainMap(device.clockDomain)
-        val fifo = Module(new TlulFifoAsync(commonParams))
+        val domainPorts = io.async_ports_devices(device.clockDomain).asInstanceOf[ClockResetBundle]
+        val fifo = Module(new TlulFifoAsync(commonParams)).suggestName(s"${device.name}_fifo")
         fifo.io.clk_h_i := clock
         fifo.io.rst_h_i := reset.asBool
-        fifo.io.clk_d_i := io.async_ports_devices(domainIndex).clock
-        fifo.io.rst_d_i := io.async_ports_devices(domainIndex).reset.asBool
+        fifo.io.clk_d_i := domainPorts.clock
+        fifo.io.rst_d_i := domainPorts.reset.asBool
         fifo.io.tl_h <> currentIface
         currentIface = fifo.io.tl_d
       }
@@ -166,19 +158,19 @@ class CoralNPUXbar(val hostParams: Seq[bus.TLULParameters], val deviceParams: Se
       // This bridge is in the device's clock domain.
       if ((deviceParams(deviceId).w * 8) != commonWidth) {
         val bridge = if (device.clockDomain != "main") {
-          val domainIndex = asyncDeviceDomainMap(device.clockDomain)
-          withClockAndReset(io.async_ports_devices(domainIndex).clock, io.async_ports_devices(domainIndex).reset) {
-            Module(new TlulWidthBridge(commonParams, deviceParams(deviceId)))
+          val domainPorts = io.async_ports_devices(device.clockDomain).asInstanceOf[ClockResetBundle]
+          withClockAndReset(domainPorts.clock, domainPorts.reset) {
+            Module(new TlulWidthBridge(commonParams, deviceParams(deviceId))).suggestName(s"${device.name}_bridge")
           }
         } else {
-          Module(new TlulWidthBridge(commonParams, deviceParams(deviceId)))
+          Module(new TlulWidthBridge(commonParams, deviceParams(deviceId))).suggestName(s"${device.name}_bridge")
         }
         bridge.io.tl_h <> currentIface
         currentIface = bridge.io.tl_d
       }
 
       // Connect the end of the conversion chain to the actual device IO port.
-      io.devices(deviceId) <> currentIface
+      io.devices(device.name) <> currentIface
 
       device.name -> standardizedIface
     }.toMap
@@ -186,11 +178,15 @@ class CoralNPUXbar(val hostParams: Seq[bus.TLULParameters], val deviceParams: Se
     // C. Instantiate Sockets
     // All sockets are now instantiated with the common parameters.
     val hostSockets = hostConnections.map { case (name, devices) =>
-      name -> Module(new TlulSocket1N(commonParams, N = devices.length))
+      val socket = Module(new TlulSocket1N(commonParams, N = devices.length))
+      socket.suggestName(s"${name}_socket")
+      name -> socket
     }.toMap
 
     val deviceSockets = deviceFanIn.collect { case (name, hosts) if hosts.length > 1 =>
-      name -> Module(new TlulSocketM1(commonParams, M = hosts.length))
+      val socket = Module(new TlulSocketM1(commonParams, M = hosts.length))
+      socket.suggestName(s"${name}_socket")
+      name -> socket
     }.toMap
 
     (hostInterfaces, deviceInterfaces, hostSockets, deviceSockets)
@@ -276,6 +272,7 @@ object CoralNPUXbarEmitter extends App {
   val deviceParams = CrossbarConfig().devices.map { device =>
     val p = new Parameters
     p.lsuDataBits = device.width
+    p.axi2IdBits = 10
     new bus.TLULParameters(p)
   }
 

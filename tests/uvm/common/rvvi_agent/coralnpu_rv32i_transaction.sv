@@ -18,11 +18,10 @@
 //--------------------------------------------------------------------------------
 class coralnpu_rv32i_transaction extends coralnpu_rvvi_decode_transaction;
 
-  //for FENCE instruction,instruction format:FENCE pred,succ
+  //For FENCE instruction,instruction format:FENCE pred,succ
   bit[3:0] fm;
   bit[3:0] pred;//predecessors,Bit3:PI,bit2:PO,bit3:PR,bit0:PW
   bit[3:0] succ;//Successors,Bit3:SI,bit2:SO,bit3:SR,bit0:SW
-
 
   `uvm_object_utils_begin(coralnpu_rv32i_transaction)
     `uvm_field_int (fm, UVM_DEFAULT)
@@ -30,9 +29,8 @@ class coralnpu_rv32i_transaction extends coralnpu_rvvi_decode_transaction;
     `uvm_field_int (succ, UVM_DEFAULT)
   `uvm_object_utils_end
 
-  function new (string name = "coralnpu_rv32i_transaction");
+  function new(string name = "coralnpu_rv32i_transaction");
     super.new(name);
-  endfunction : new
+  endfunction:new
 
-
-endclass : coralnpu_rv32i_transaction
+endclass:coralnpu_rv32i_transaction

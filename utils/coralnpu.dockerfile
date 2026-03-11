@@ -32,6 +32,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked --mount=type=cache,t
         gawk \
         git \
         gnupg \
+        libelf-dev \
         libmpfr-dev \
         lsb-release \
         openjdk-17-jdk-headless \

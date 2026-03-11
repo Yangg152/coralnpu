@@ -20,13 +20,25 @@
 class coralnpu_rv32m_transaction extends coralnpu_rvvi_decode_transaction;
 
   mult_div_e inst_name;
+<<<<<<< HEAD:tests/uvm/common/rvvi_agent/coralnpu_rv32m_transaction.sv
+=======
+
+>>>>>>> 07fae9c (VSI-update i,m,zbb,zifencei,cov and transaction):tests/uvm/common/coralnpu_rvvi_agent/coralnpu_rv32m_transaction.sv
   `uvm_object_utils_begin(coralnpu_rv32m_transaction)
         `uvm_field_enum (mult_div_e,inst_name, UVM_DEFAULT)
   `uvm_object_utils_end
 
+<<<<<<< HEAD:tests/uvm/common/rvvi_agent/coralnpu_rv32m_transaction.sv
   function new (string name = "coralnpu_rv32m_transaction");
     super.new(name);
   endfunction : new
 
 
 endclass : coralnpu_rv32m_transaction
+=======
+  function new(string name = "coralnpu_rv32m_transaction");
+    super.new(name);
+  endfunction:new
+
+endclass:coralnpu_rv32m_transaction
+>>>>>>> 07fae9c (VSI-update i,m,zbb,zifencei,cov and transaction):tests/uvm/common/coralnpu_rvvi_agent/coralnpu_rv32m_transaction.sv

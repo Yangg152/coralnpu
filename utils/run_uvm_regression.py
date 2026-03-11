@@ -98,7 +98,13 @@ def get_targets(limit: Optional[int] = None,
     logging.info("Querying bazel targets...")
     # Using --output=xml to parse attributes
     cmd = ["bazel", "query", "kind(coralnpu_v2_binary, //...)", "--output=xml"]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Bazel query failed: {e}")
+        if e.stderr:
+            logging.error(f"Stderr: {e.stderr}")
+        sys.exit(1)
     root = ET.fromstring(result.stdout)
     targets = []
     for rule in root.findall('rule'):
@@ -151,8 +157,8 @@ def build_targets(targets: List[str]) -> bool:
     try:
         subprocess.run(cmd, check=True)
         return True
-    except subprocess.CalledProcessError:
-        logging.error("Build failed for some targets.")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Build failed for some targets: {e}")
         return False
 
 
@@ -170,7 +176,7 @@ def get_elf_source_path(target: str) -> Optional[str]:
                 return line.strip()
         return None
     except subprocess.CalledProcessError as e:
-        logging.error("Error finding ELF source path: {e}")
+        logging.error(f"Error finding ELF source path: {e}")
         return None
 
 
@@ -196,8 +202,8 @@ def build_simulator(mpact_root: str,
     try:
         subprocess.run(cmd, check=True, env=env)
         return True
-    except subprocess.CalledProcessError:
-        logging.error("Simulator build failed.")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Simulator build failed: {e}")
         return False
 
 
@@ -209,8 +215,8 @@ def build_spike() -> Optional[str]:
         # Return the absolute path to the binary
         return os.path.abspath(
             "bazel-bin/external/riscv_isa_sim/riscv_isa_sim/bin/spike")
-    except subprocess.CalledProcessError:
-        logging.error("Spike build failed.")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Spike build failed: {e}")
         return None
 
 
@@ -351,8 +357,8 @@ def get_riscv_test_artifacts() -> List[Tuple[str, str]]:
                                 capture_output=True,
                                 text=True,
                                 check=True)
-    except subprocess.CalledProcessError:
-        logging.error("Failed to query riscv-tests outputs.")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Failed to query riscv-tests outputs: {e}")
         return []
 
     artifacts = []
@@ -652,6 +658,9 @@ def run_full_regression(tests_to_run: List[Tuple[str, str]], spike_bin: str,
     logging.info(f"Creating archive {zip_filename}.zip...")
     shutil.make_archive(zip_filename, 'zip', output_dir)
     logging.info(f"Artifact created: {os.path.abspath(zip_filename + '.zip')}")
+
+    if status == "FAIL":
+        sys.exit(1)
 
 
 def main():
