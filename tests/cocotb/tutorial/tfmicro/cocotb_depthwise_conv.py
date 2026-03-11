@@ -19,31 +19,68 @@ from bazel_tools.tools.python.runfiles import runfiles
 from coralnpu_test_utils.sim_test_fixture import Fixture
 
 
-def tolerate(target: int, tolerance = 1.2) -> int:
+# ==============================================================================
+# Global Storage for Final Summary
+# ==============================================================================
+TEST_RESULTS = []
+
+def print_global_summary(log):
+    """Prints a cumulative table of all depthwise conv test results so far."""
+    header = (
+        f"\n{'='*120}\n"
+        f"{'In Shape':<22} | {'Filter':<12} | {'DM':>4} | {'Stride':>6} | "
+        f"{'Ref Cycles':>12} | {'Opt Cycles':>12} | {'Speedup':>8} | {'Status':>8}\n"
+        f"{'-'*120}"
+    )
+    rows = []
+    for res in TEST_RESULTS:
+        opt_cyc_str  = f"{res['opt']:12d}"   if res['opt']     is not None else f"{'-':>12}"
+        speedup_str  = f"{res['speedup']:7.2f}x" if res['speedup'] is not None else f"{'-':>8}"
+        rows.append(
+            f"{res['in_shape']:<22} | {res['filter']:<12} | {res['dm']:>4} | {res['stride']:>6} | "
+            f"{res['ref']:12d} | {opt_cyc_str} | {speedup_str} | {res['status']:>8}"
+        )
+
+    table = "\n".join([header] + rows + [f"{'='*120}\n"])
+    log.info(table)
+
+
+# ==============================================================================
+# Helper
+# ==============================================================================
+
+def tolerate(target: int, tolerance: float = 1.2) -> int:
     return int(target * tolerance)
 
 
 class DepthwiseConvTest:
     # frozen: filter_xy=3, padding=1, dilation=1
-    def __init__(self, in_d, dm = 1, stride = 1, out_h = 4, out_w = 4):
-        self.dm = dm
+    def __init__(self, dut, in_d, dm=1, stride=1, out_h=4, out_w=4):
+        self.dut    = dut
+        self.dm     = dm
         self.stride = stride
-        out_d = in_d * dm
-        in_h = out_h * stride
-        in_w = out_w * stride
-        self.in_shape = np.array([1, in_h, in_w, in_d], dtype=np.uint32)
-        self.f_shape = np.array([1, 3, 3, out_d], dtype=np.uint32)
-        self.bias_shape = np.array([out_d], dtype=np.uint32)
-        self.out_shape = np.array([1, out_h, out_w, out_d], dtype=np.uint32)
-        self.out_size = int(np.prod(self.out_shape))
+
+        out_d  = in_d * dm
+        in_h   = out_h * stride
+        in_w   = out_w * stride
+
+        self.in_shape   = np.array([1, in_h, in_w, in_d], dtype=np.uint32)
+        self.f_shape    = np.array([1, 3, 3, out_d],       dtype=np.uint32)
+        self.bias_shape = np.array([out_d],                dtype=np.uint32)
+        self.out_shape  = np.array([1, out_h, out_w, out_d], dtype=np.uint32)
+        self.out_size   = int(np.prod(self.out_shape))
+
+        # Pretty strings for the summary table
+        self._in_shape_str  = f"[1,{in_h},{in_w},{in_d}]"
+        self._filter_str    = f"[1,3,3,{out_d}]"
 
         r = runfiles.Create()
         self.elf_file = r.Rlocation(
             'coralnpu_hw/tests/cocotb/tutorial/tfmicro/depthwise_conv_test.elf')
         self.fixture = None
 
-    async def load_and_populate_input(self, dut):
-        self.fixture = await Fixture.Create(dut, highmem=True)
+    async def load_and_populate_input(self):
+        self.fixture = await Fixture.Create(self.dut, highmem=True)
         await self.fixture.load_elf_and_lookup_symbols(
             self.elf_file,
             [
@@ -75,122 +112,158 @@ class DepthwiseConvTest:
         await self.fixture.write_word('stride', self.stride)
         await self.fixture.write_word('dm', self.dm)
         await self.fixture.write('filter_shape', self.f_shape)
-        await self.fixture.write('filter_data', filter_data)
-        await self.fixture.write('bias_shape', self.bias_shape)
-        await self.fixture.write('bias_data', bias_data)
-        await self.fixture.write('input_shape', self.in_shape)
-        await self.fixture.write('input_data', input_data)
+        await self.fixture.write('filter_data',  filter_data)
+        await self.fixture.write('bias_shape',   self.bias_shape)
+        await self.fixture.write('bias_data',    bias_data)
+        await self.fixture.write('input_shape',  self.in_shape)
+        await self.fixture.write('input_data',   input_data)
         await self.fixture.write('output_shape', self.out_shape)
 
-    async def run(self, func_ptr: str, timeout_cycles):
+    async def _run_kernel(self, func_ptr: str, timeout_cycles: int):
         await self.fixture.write_ptr('impl', func_ptr)
         await self.fixture.write(
             'output_data', np.zeros([self.out_size], dtype=np.int8))
-        cycles = await self.fixture.run_to_halt(timeout_cycles=timeout_cycles)
+        cycles  = await self.fixture.run_to_halt(timeout_cycles=timeout_cycles)
         outputs = (await self.fixture.read(
             'output_data', self.out_size)).view(np.int8)
         return outputs, cycles
 
-    async def test(self, ref_target, opt_target):
-        ref_output, ref_cycles = await self.run(
+    async def test(self, ref_target: int, opt_target: int):
+        """Run both ref and optimized kernels, verify outputs, and print summary."""
+        # --- Reference ---
+        ref_output, ref_cycles = await self._run_kernel(
             'run_ref', tolerate(ref_target))
-        print(f'ref_cycles={ref_cycles}', flush=True)
-        opt_output, opt_cycles = await self.run(
+
+        # --- Optimized ---
+        opt_output, opt_cycles = await self._run_kernel(
             'run_optimized', tolerate(opt_target))
-        print(f'opt_cycles={opt_cycles}', flush=True)
 
-        assert (opt_output == ref_output).all()
+        # --- Verify ---
+        match   = (opt_output == ref_output).all()
+        status  = "PASS" if match else "FAIL"
+        speedup = ref_cycles / opt_cycles if opt_cycles > 0 else 0.0
 
-    async def benchmark(self, opt_target):
-        _, opt_cycles = await self.run('run_optimized', tolerate(opt_target))
-        print(f'opt_cycles={opt_cycles}', flush=True)
+        # --- Record ---
+        TEST_RESULTS.append({
+            "in_shape": self._in_shape_str,
+            "filter":   self._filter_str,
+            "dm":       self.dm,
+            "stride":   self.stride,
+            "ref":      ref_cycles,
+            "opt":      opt_cycles,
+            "speedup":  speedup,
+            "status":   status,
+        })
 
+        # --- Print cumulative table ---
+        print_global_summary(self.dut._log)
+
+        assert match, (
+            f"Output mismatch! ref vs opt differ at "
+            f"{(~(opt_output == ref_output)).sum()} positions."
+        )
+
+    async def benchmark(self, opt_target: int):
+        """Run only the optimized kernel (benchmark mode) and print summary."""
+        _, opt_cycles = await self._run_kernel(
+            'run_optimized', tolerate(opt_target))
+
+        TEST_RESULTS.append({
+            "in_shape": self._in_shape_str,
+            "filter":   self._filter_str,
+            "dm":       self.dm,
+            "stride":   self.stride,
+            "ref":      0,
+            "opt":      opt_cycles,
+            "speedup":  None,
+            "status":   "BENCH",
+        })
+
+        print_global_summary(self.dut._log)
+
+
+# ==============================================================================
 # Tests
 # Cycle count targets come from `-c dbg` runs and are significantly
 # slower than `-c opt` because DCHECKs are enabled.
+# ==============================================================================
 
 @cocotb.test()
 async def test_dwconv8to8stride1(dut):
-    t = DepthwiseConvTest(in_d=8)
-    await t.load_and_populate_input(dut)
+    t = DepthwiseConvTest(dut, in_d=8)
+    await t.load_and_populate_input()
     await t.test(ref_target=226_000, opt_target=26_600)
 
 @cocotb.test()
 async def test_dwconv8to8stride2(dut):
-    t = DepthwiseConvTest(in_d=8, stride=2)
-    await t.load_and_populate_input(dut)
+    t = DepthwiseConvTest(dut, in_d=8, stride=2)
+    await t.load_and_populate_input()
     await t.test(ref_target=257_000, opt_target=26_400)
-
 
 @cocotb.test()
 async def test_dwconv32to32stride1(dut):
-    t = DepthwiseConvTest(in_d=32)
-    await t.load_and_populate_input(dut)
+    t = DepthwiseConvTest(dut, in_d=32)
+    await t.load_and_populate_input()
     await t.test(ref_target=899_000, opt_target=30_600)
-
 
 @cocotb.test()
 async def test_dwconv32to32stride2(dut):
-    t = DepthwiseConvTest(in_d=32, stride=2)
-    await t.load_and_populate_input(dut)
+    t = DepthwiseConvTest(dut, in_d=32, stride=2)
+    await t.load_and_populate_input()
     await t.test(ref_target=1_019_000, opt_target=28_500)
-
 
 @cocotb.test()
 async def test_dwconv64to64stride1(dut):
-    t = DepthwiseConvTest(in_d=64)
-    await t.load_and_populate_input(dut)
+    t = DepthwiseConvTest(dut, in_d=64)
+    await t.load_and_populate_input()
     await t.test(ref_target=1_800_000, opt_target=49_300)
-
 
 @cocotb.test()
 async def test_dwconv64to64stride2(dut):
-    t = DepthwiseConvTest(in_d=64, stride=2)
-    await t.load_and_populate_input(dut)
+    t = DepthwiseConvTest(dut, in_d=64, stride=2)
+    await t.load_and_populate_input()
     await t.test(ref_target=2_040_000, opt_target=45_700)
-
 
 @cocotb.test()
 async def test_dwconv16to32stride2(dut):
-    t = DepthwiseConvTest(in_d=16, dm=2, stride=2)
-    await t.load_and_populate_input(dut)
+    t = DepthwiseConvTest(dut, in_d=16, dm=2, stride=2)
+    await t.load_and_populate_input()
     await t.test(ref_target=1_010_000, opt_target=41_600)
 
-# Benchmarks are skipped by default.
-# Run with COCOTB_TESTCASE=name
+
+# ==============================================================================
+# Benchmarks — skipped by default.
+# Run with COCOTB_TESTCASE=<name>
 # Cycle count targets here come from `-c opt` runs.
+# ==============================================================================
 
 @cocotb.test(skip=True)
 async def benchmark_dwconv8to8(dut):
-    t = DepthwiseConvTest(in_d=8, out_h=112, out_w=112)
-    await t.load_and_populate_input(dut)
+    t = DepthwiseConvTest(dut, in_d=8, out_h=112, out_w=112)
+    await t.load_and_populate_input()
     # TODO(davidgao): update expectation after we get automatic lmul reduction
     await t.benchmark(opt_target=2_600_000)
 
-
 @cocotb.test(skip=True)
 async def benchmark_dwconv32to32(dut):
-    t = DepthwiseConvTest(in_d=32, out_h=56, out_w=56)
-    await t.load_and_populate_input(dut)
+    t = DepthwiseConvTest(dut, in_d=32, out_h=56, out_w=56)
+    await t.load_and_populate_input()
     await t.benchmark(opt_target=974_000)
-
 
 @cocotb.test(skip=True)
 async def benchmark_dwconv64to64(dut):
-    t = DepthwiseConvTest(in_d=64, out_h=28, out_w=28)
-    await t.load_and_populate_input(dut)
+    t = DepthwiseConvTest(dut, in_d=64, out_h=28, out_w=28)
+    await t.load_and_populate_input()
     await t.benchmark(opt_target=528_000)
-
 
 @cocotb.test(skip=True)
 async def benchmark_dwconv128to128(dut):
-    t = DepthwiseConvTest(in_d=128, out_h=14, out_w=14)
-    await t.load_and_populate_input(dut)
+    t = DepthwiseConvTest(dut, in_d=128, out_h=14, out_w=14)
+    await t.load_and_populate_input()
     await t.benchmark(opt_target=301_000)
-
 
 @cocotb.test(skip=True)
 async def benchmark_dwconv256to256(dut):
-    t = DepthwiseConvTest(in_d=256, out_h=7, out_w=7)
-    await t.load_and_populate_input(dut)
+    t = DepthwiseConvTest(dut, in_d=256, out_h=7, out_w=7)
+    await t.load_and_populate_input()
     await t.benchmark(opt_target=180_000)

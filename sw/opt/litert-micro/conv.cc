@@ -42,9 +42,13 @@ struct AlignedFree {
 template <typename T>
 using aligned_array = std::unique_ptr<T[], AlignedFree>;
 
+// [BUG FIX #1] aligned_alloc 要求 size 必须是 alignment 的整数倍，
+// 否则行为未定义 (UB)。修复：将 size 向上取整到 alignment 的倍数。
 template <typename T>
 aligned_array<T> make_aligned_array(size_t alignment, size_t nmemb) {
-  void* ptr = aligned_alloc(alignment, sizeof(T) * nmemb);
+  size_t raw_size = sizeof(T) * nmemb;
+  size_t aligned_size = ((raw_size + alignment - 1) / alignment) * alignment;
+  void* ptr = aligned_alloc(alignment, aligned_size);
   return aligned_array<T>(reinterpret_cast<T*>(ptr));
 }
 
@@ -55,6 +59,10 @@ inline __attribute__((always_inline)) vint8m1_t QuantizeResult_m4(
     vint32m4_t acc, vint32m4_t v_mult, vuint32m4_t v_lshift, vuint32m4_t v_rshift,
     int32_t output_offset, int32_t output_min, int32_t output_max, size_t vl) {
     
+    // [NOTE] vxrm=0 表示 round-to-nearest-up。
+    // 硬件实际使用的舍入模式由 CSR vxrm 寄存器决定，intrinsic 的 policy 参数
+    // 仅作为编译器 hint。若需精确控制，应在函数入口用 __riscv_vsetvl 或
+    // inline asm 设置 CSR。此处保持与 TFLite 参考实现一致（round-to-nearest）。
     constexpr uint32_t vxrm = 0; 
     acc = __riscv_vsll_vv_i32m4(acc, v_lshift, vl);
     acc = __riscv_vsmul_vv_i32m4(acc, v_mult, vxrm, vl);
@@ -142,6 +150,8 @@ void Conv1x1PerChannelRVV_Optimized(
     // Weights: m2 + m1 = 3 regs (v24-v26)
     // 剩余: 5 regs. 安全。
     int p = 0;
+    // [NOTE] 循环条件 p <= num_pixels - 6 等价于 p + 5 < num_pixels，
+    // 语义正确：确保 p, p+1, ..., p+5 均在范围内。
     const int p_loop_end = num_pixels - 6;
 
     for (; p <= p_loop_end; p += 6) {
@@ -163,6 +173,8 @@ void Conv1x1PerChannelRVV_Optimized(
 
       for (int ic = 0; ic < input_depth; ++ic) {
         // Strided Load Weights (开销大，被 6 个像素分摊)
+        // w_ptr_base + ic: 第0个输出通道对应ic位置的权重
+        // stride = input_depth: 相邻输出通道的步幅
         vint8m1_t w_8 = __riscv_vlse8_v_i8m1(w_ptr + ic, w_stride, vl);
         vint16m2_t w_16 = __riscv_vsext_vf2_i16m2(w_8, vl);
 
@@ -213,6 +225,8 @@ void Conv1x1PerChannelRVV_Optimized(
           vuint32m4_t v_rshift = __riscv_vzext_vf4_u32m4(__riscv_vle8_v_u8m1(rshift_data.get() + out_c, vl), vl);
           
           // Lambda to process remaining steps and store
+          // [NOTE] 按引用捕获 p：此时 p 是本次迭代的起始值（循环体内 p 尚未递增），
+          // offset_idx 提供像素偏移，所以 p + offset_idx 计算正确。
           auto finish_quant = [&](vint32m4_t& acc, int offset_idx) {
               acc = __riscv_vssra_vv_i32m4(acc, v_rshift, 0, vl);
               acc = __riscv_vadd_vx_i32m4(acc, output_offset, vl);
@@ -483,7 +497,9 @@ TfLiteStatus ConvEval(TfLiteContext* context, TfLiteNode* node) {
   }
 
   tflite::ConvParams op_params;
-  op_params.padding_type = tflite::PaddingType::kSame; 
+  // [BUG FIX #2] 原代码硬编码 kSame，导致 VALID padding 模型输出错误。
+  // 修复：从 TfLiteConvParams 正确转换 padding 类型。
+  op_params.padding_type = tflite::micro::RuntimePaddingType(params->padding);
   op_params.padding_values.width = data.padding.width;
   op_params.padding_values.height = data.padding.height;
   op_params.stride_width = params->stride_width;

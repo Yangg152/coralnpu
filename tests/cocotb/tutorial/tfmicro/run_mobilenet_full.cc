@@ -10,7 +10,8 @@
 #include "sw/opt/litert-micro/depthwise_conv.h" 
 #include "sw/opt/litert-micro/mul.h" 
 #include "sw/opt/litert-micro/sub.h" 
-#include "sw/opt/litert-micro/mean.h" 
+#include "sw/opt/litert-micro/mean.h"
+#include "sw/opt/litert-micro/softmax.h"
 
 #include "tensorflow/lite/core/c/common.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
@@ -41,6 +42,7 @@ using coralnpu_v2::opt::litert_micro::Register_DEPTHWISE_CONV_2D;
 using coralnpu_v2::opt::litert_micro::Register_MUL;
 using coralnpu_v2::opt::litert_micro::Register_SUB;
 using coralnpu_v2::opt::litert_micro::Register_MEAN;
+using coralnpu_v2::opt::litert_micro::Register_SOFTMAX;
 
 TfLiteStatus RegisterOps(MobilenetOpResolver& op_resolver) {
   // TF_LITE_ENSURE_STATUS(op_resolver.AddConv2D());
@@ -55,7 +57,7 @@ TfLiteStatus RegisterOps(MobilenetOpResolver& op_resolver) {
   TF_LITE_ENSURE_STATUS(op_resolver.AddSub(Register_SUB())); 
   TF_LITE_ENSURE_STATUS(op_resolver.AddMean(Register_MEAN()));
   TF_LITE_ENSURE_STATUS(op_resolver.AddReshape());             
-  TF_LITE_ENSURE_STATUS(op_resolver.AddSoftmax());  
+  TF_LITE_ENSURE_STATUS(op_resolver.AddSoftmax(Register_SOFTMAX()));  
 
   return kTfLiteOk;
 }
@@ -70,8 +72,8 @@ struct OpLogEntry {
 constexpr int kMaxLogEntries = 128;
 
 extern "C" {
-constexpr size_t kTensorArenaSize = 300 * 1024; 
-uint8_t tensor_arena[kTensorArenaSize] __attribute__((section(".data"), aligned(16)));    
+constexpr size_t kTensorArenaSize = 400 * 1024; 
+uint8_t tensor_arena[kTensorArenaSize] __attribute__((section(".extdata"), aligned(16)));    
 
 char debug_log_buffer[512] __attribute__((section(".data"), aligned(16)));
 

@@ -189,6 +189,7 @@ coralnpu_v2_binary(
         "//sw/opt/litert-micro:conv",
         "//sw/opt/litert-micro:depthwise_conv",
         "//sw/opt/litert-micro:mean", 
+        "//sw/opt/litert-micro:softmax",
         "@tflite_micro//tensorflow/lite/micro:micro_framework",
         "@tflite_micro//tensorflow/lite/micro:micro_log",
         "@tflite_micro//tensorflow/lite/micro:micro_profiler",
