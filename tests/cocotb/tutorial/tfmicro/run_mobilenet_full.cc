@@ -72,7 +72,7 @@ struct OpLogEntry {
 constexpr int kMaxLogEntries = 128;
 
 extern "C" {
-constexpr size_t kTensorArenaSize = 400 * 1024; 
+constexpr size_t kTensorArenaSize = 8 * 1024 * 1024; 
 uint8_t tensor_arena[kTensorArenaSize] __attribute__((section(".extdata"), aligned(16)));    
 
 char debug_log_buffer[512] __attribute__((section(".data"), aligned(16)));

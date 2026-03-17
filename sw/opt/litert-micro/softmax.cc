@@ -51,34 +51,24 @@ void SoftmaxQuantized(
   // 提前计算 LUT 有效范围：-diff >= diff_min => diff <= -diff_min
   const int valid_diff_max = std::min(255, static_cast<int>(-diff_min));
 
-  const int total_elements = outer_size * depth;
-
   // =========================================================
-  // 小尺寸张量优化路径：免去建立全局 LUT 的过量开销
+  // 小尺寸张量退回路径：纯标量实现
+  // 避免极短向量的 RVV 启动开销与建立行级 LUT 的过量开销
   // =========================================================
-  if (total_elements < 64) {
+  if (depth < 128) {
     for (int i = 0; i < outer_size; ++i) {
       const int8_t* in_ptr  = input_data  + i * depth;
       int8_t*       out_ptr = output_data + i * depth;
 
-      // Find Max（向量化）
-      int8_t   max_in_row = std::numeric_limits<int8_t>::min();
-      size_t   n          = static_cast<size_t>(depth);
-      const int8_t* ptr   = in_ptr;
-      vint8m1_t v_max_val = __riscv_vmv_v_x_i8m1(max_in_row, 1);
-      while (n > 0) {
-        size_t vl      = __riscv_vsetvl_e8m8(n);
-        vint8m8_t v_d  = __riscv_vle8_v_i8m8(ptr, vl);
-        v_max_val      = __riscv_vredmax_vs_i8m8_i8m1(v_d, v_max_val, vl);
-        ptr += vl;
-        n   -= vl;
+      // 1. 纯标量 Find Max
+      int8_t max_in_row = std::numeric_limits<int8_t>::min();
+      for (int c = 0; c < depth; ++c) {
+        max_in_row = std::max(max_in_row, in_ptr[c]);
       }
-      max_in_row = __riscv_vmv_x_s_i8m1_i8(v_max_val);
 
-      // Exp Sum（scalar）
+      // 2. 纯标量 Exp Sum
       FixedPointAccum sum_of_exps = FixedPointAccum::Zero();
       for (int c = 0; c < depth; ++c) {
-        // 修复：用 int32 中间值计算 diff，语义明确
         const int32_t diff = static_cast<int32_t>(in_ptr[c]) - static_cast<int32_t>(max_in_row);
         if (diff >= diff_min) {
           const int32_t input_diff_rescaled = MultiplyByQuantizedMultiplierGreaterThanOne(
@@ -91,11 +81,13 @@ void SoftmaxQuantized(
         }
       }
 
+      // 3. 计算倒数尺度
       int       num_bits_over_unit;
       FixedPoint0 shifted_scale = FixedPoint0::FromRaw(GetReciprocal(
           sum_of_exps.raw(), kAccumulationIntegerBits, &num_bits_over_unit));
       const int exponent = num_bits_over_unit + 31 - 8;
 
+      // 4. 纯标量归一化输出
       for (int c = 0; c < depth; ++c) {
         const int32_t diff = static_cast<int32_t>(in_ptr[c]) - static_cast<int32_t>(max_in_row);
         if (diff >= diff_min) {
@@ -119,7 +111,7 @@ void SoftmaxQuantized(
   }
 
   // =========================================================
-  // 大尺寸张量优化路径：全局 LUT + RVV 向量化
+  // 大尺寸张量优化路径：全局 LUT + 行级 LUT + RVV 向量查表访存
   // =========================================================
 
   // 建立全局 Exp LUT（仅计算有效范围，其余填 0 / -128）
@@ -171,12 +163,14 @@ void SoftmaxQuantized(
     while (n > 0) {
       size_t vl = __riscv_vsetvl_e8m2(n);
 
-      // 计算 diff = max - input（uint8 自然截断到 [0,255]）
+      // 计算 diff = max - input 
+      // 巧用 uint8 模 256 算术特性：已知 max >= input，重解释为 uint8 做向量减法，
+      // 溢出回绕的结果天然即是 [0, 255] 的正差值，省去升位开销
       vuint8m2_t v_diff8 = __riscv_vrsub_vx_u8m2(
           __riscv_vreinterpret_v_i8m2_u8m2(__riscv_vle8_v_i8m2(ptr, vl)),
           static_cast<uint8_t>(max_in_row), vl);
 
-      // 扩展为 32bit byte offset（*4 因为 int32 元素）
+      // 扩展为 32bit byte offset（*4 因为 int32 元素占据 4 字节）
       vuint32m8_t v_offset = __riscv_vwmulu_vx_u32m8(
           __riscv_vzext_vf2_u16m4(v_diff8, vl), 4u, vl);
 
@@ -194,7 +188,7 @@ void SoftmaxQuantized(
     FixedPointAccum sum_of_exps = FixedPointAccum::FromRaw(sum_raw);
 
     // ----------------------------------------------------------
-    // 步骤 3：计算倒数
+    // 步骤 3：计算倒数尺度
     // ----------------------------------------------------------
     int       num_bits_over_unit;
     FixedPoint0 shifted_scale = FixedPoint0::FromRaw(GetReciprocal(
@@ -202,7 +196,7 @@ void SoftmaxQuantized(
     const int exponent = num_bits_over_unit + 31 - 8;
 
     // ----------------------------------------------------------
-    // 步骤 4：构建行 LUT（仅计算有效范围）
+    // 步骤 4：构建行级输出 LUT（仅计算有效范围）
     // ----------------------------------------------------------
     int8_t row_out_lut[256];
 
@@ -231,7 +225,8 @@ void SoftmaxQuantized(
       size_t vl = __riscv_vsetvl_e8m8(n);
 
       vint8m8_t  v_data = __riscv_vle8_v_i8m8(ptr, vl);
-      // 修复：用 int32 语义确保 diff = max - input 正确，再截断为 uint8
+      
+      // 巧用 uint8 模 256 算术特性：同步骤 2，直接得到正确的查表索引
       vuint8m8_t v_diff = __riscv_vrsub_vx_u8m8(
           __riscv_vreinterpret_v_i8m8_u8m8(v_data),
           static_cast<uint8_t>(max_in_row), vl);

@@ -162,3 +162,27 @@ async def test_softmax_1x1000_reshaped(dut):
     test = SoftmaxTest(dut, shape=(1, 1, 1000))
     await test.setup()
     await test.run_compare(ref_limit=2_000_000, opt_limit=500_000)
+
+# ==============================================================================
+# 性能扫描测试 (用于寻找标量/向量盈亏平衡点)
+# ==============================================================================
+@cocotb.test()
+async def test_softmax_threshold_sweep(dut):
+    """
+    Sweep Softmax depth to find the optimal threshold (break-even point).
+    """
+    # 密集扫描 8 到 128 的范围，寻找交叉点
+    depths_to_test = [8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 96, 128, 256]
+    
+    dut._log.info("==================================================")
+    dut._log.info("      Starting Softmax Threshold Sweep Test       ")
+    dut._log.info("==================================================")
+    
+    for d in depths_to_test:
+        test = SoftmaxTest(dut, shape=(1, 1, d))
+        await test.setup()
+        # 将 timeout 放宽，因为较大的 depth 可能会跑较长时间
+        await test.run_compare(ref_limit=10_000_000, opt_limit=10_000_000)
+        
+    dut._log.info("Sweep Test Completed! Please check the Global Summary Table.")
+

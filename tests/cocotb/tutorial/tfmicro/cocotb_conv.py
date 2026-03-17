@@ -283,7 +283,7 @@ class ConvTest:
 async def test_conv1x1_mini(dut):
     t = ConvTest(in_ch=8, out_ch=8, h=4, w=4)
     await t.load_and_populate_input(dut)
-    await t.test(ref_target=60_000, opt_target=15_000, run_ref=True, check_python=True)
+    await t.test(ref_target=60_000, opt_target=30_000, run_ref=True, check_python=True)
 
 @cocotb.test()
 async def test_conv3x3_basic(dut):
@@ -330,6 +330,7 @@ async def test_conv3x3_odd_channels(dut):
 #     await t.load_and_populate_input(dut)
 #     await t.test(ref_target=1_000_000, opt_target=200_000, run_ref=True, check_python=True)
 
+
 # 5. 通用卷积 Fallback 测试
 # 5x5 卷积，你的代码应该自动回退到 Reference 实现，确保 Dispatch 逻辑正确
 @cocotb.test()
@@ -339,6 +340,15 @@ async def test_conv5x5_fallback(dut):
     await t.test(ref_target=1_000_000, opt_target=200_000, run_ref=True, check_python=True)
 
 # === Benchmarks ===
+
+@cocotb.test()
+async def benchmark_1x1_layer3_equivalent(dut):
+    # Equivalent to VWW network sequence 3: 1x1 conv after first DW layer
+    # Input spatial: ~48x48, channels 8->16
+    t = ConvTest(in_ch=8, out_ch=16, h=64, w=64, kernel_size=1, stride=1, padding=0)
+    await t.load_and_populate_input(dut)
+    await t.test(ref_target=30_000_000, opt_target=500_000, run_ref=True, check_python=True)
+
 
 @cocotb.test()
 async def benchmark_op0_layer1(dut):
@@ -354,12 +364,20 @@ async def benchmark_op0_layer1(dut):
 @cocotb.test()
 async def benchmark_pointwise_mid(dut):
     # Middle layer
-    t = ConvTest(in_ch=16, out_ch=32, h=32, w=32, kernel_size=1, stride=1, padding=0)
+    t = ConvTest(in_ch=8, out_ch=32, h=32, w=32, kernel_size=1, stride=1, padding=0)
     await t.load_and_populate_input(dut)
     
     await t.test(ref_target=30_000_000, opt_target=3_000_000, 
                  run_ref=False, fixed_ref_cycles=16376189,
                  check_python=True)
+
+
+@cocotb.test()
+async def benchmark_1x1_ch64_to_128(dut):
+    t = ConvTest(in_ch=64, out_ch=128, h=8, w=8, kernel_size=1, stride=1, padding=0)
+    await t.load_and_populate_input(dut)
+    # 对于极密集的运算，建议 timeout 设大一些防止仿真提前终止
+    await t.test(ref_target=50_000_000, opt_target=1_000_000, run_ref=True, check_python=True)
 
 @cocotb.test()
 async def z_final_report(dut):

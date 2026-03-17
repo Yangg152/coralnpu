@@ -21,7 +21,6 @@
 #include <cstdlib>
 
 #include "sw/opt/litert-micro/accumulator_util.h"
-#include "sw/opt/litert-micro/memory_util.h"
 #include "sw/opt/rvv_opt.h"
 #include "tensorflow/lite/kernels/kernel_util.h"
 #include "tensorflow/lite/micro/kernels/kernel_util.h"
@@ -50,6 +49,20 @@ namespace {
 // TODO(davidgao): move away?
 inline int idiv_ceil(int x, int y) { return (x + y - 1) / y; }
 
+// TODO(davidgao): move away and share these with other kernels
+struct AlignedFree {
+  void operator()(void* ptr) const { std::free(ptr); }
+};
+
+template <typename T>
+using aligned_array = std::unique_ptr<T[], AlignedFree>;
+
+template <typename T>
+aligned_array<T> make_aligned_array(size_t alignment, size_t nmemb) {
+  return aligned_array<T>(
+      reinterpret_cast<T*>(aligned_alloc(alignment, sizeof(T) * nmemb)));
+}
+
 void DepthwiseConvPerChannelPatch(
     const DepthwiseParams& params, const int32_t* output_multiplier,
     const uint8_t* shift_left, const uint8_t* shift_right,
@@ -57,7 +70,7 @@ void DepthwiseConvPerChannelPatch(
     const RuntimeShape& f_shape, const int8_t* f_data,
     const RuntimeShape& bias_shape, const int32_t* bias_data,
     const RuntimeShape& out_shape, int8_t* out_data, int out_y_st, int out_y_ed,
-    int out_x_st, int out_x_ed, int32_t* accs) {
+    int out_x_st, int out_x_ed) {
   // Get parameters.
   const int stride_w = params.stride_width;
   const int stride_h = params.stride_height;
@@ -79,6 +92,9 @@ void DepthwiseConvPerChannelPatch(
   const int in_d = in_shape.Dims(3);
   const int f_h = f_shape.Dims(1);
   const int f_w = f_shape.Dims(2);
+
+  auto accs = make_aligned_array<int32_t>(16, (out_x_ed - out_x_st) * out_d);
+  TFLITE_DCHECK_NE(accs, nullptr);
 
   for (int batch = 0; batch < batches; ++batch) {
     for (int out_y = out_y_st; out_y < out_y_ed; ++out_y) {
@@ -139,7 +155,7 @@ void DepthwiseConvPerChannelPatch(
         }
       }
 
-      PostprocessAcc(accs, bias_data, shift_left, output_multiplier,
+      PostprocessAcc(accs.get(), bias_data, shift_left, output_multiplier,
                      shift_right, output_offset, output_activation_min,
                      output_activation_max,
                      &out_data[Offset(out_shape, batch, out_y, out_x_st, 0)],
@@ -155,7 +171,7 @@ void DepthwiseConvPerChannelPatchCenter3x3Reuse6(
     const RuntimeShape& f_shape, const int8_t* f_data,
     const RuntimeShape& bias_shape, const int32_t* bias_data,
     const RuntimeShape& out_shape, int8_t* out_data, int out_y_st, int out_y_ed,
-    int out_x_st, int out_x_ed, int32_t* accs) {
+    int out_x_st, int out_x_ed) {
   // Get parameters.
   const int stride_w = params.stride_width;
   const int stride_h = params.stride_height;
@@ -183,6 +199,10 @@ void DepthwiseConvPerChannelPatchCenter3x3Reuse6(
   const int out_patch_w = out_x_ed - out_x_st;
   const int32_t acc_shape_[] = {1, out_patch_h, out_patch_w, out_d};
   const tflite::RuntimeShape acc_shape(4, acc_shape_);
+
+  auto accs =
+      make_aligned_array<int32_t>(16, out_patch_h * out_patch_w * out_d);
+  TFLITE_DCHECK_NE(accs, nullptr);
 
   for (int batch = 0; batch < batches; ++batch) {
     // Accumulators in memory are at this scope.
@@ -379,7 +399,7 @@ void DepthwiseConvPerChannel(
     const int32_t* output_shift, const RuntimeShape& in_shape,
     const int8_t* in_data, const RuntimeShape& f_shape, const int8_t* f_data,
     const RuntimeShape& bias_shape, const int32_t* bias_data,
-    const RuntimeShape& out_shape, int8_t* out_data, int32_t* accs_buf) {
+    const RuntimeShape& out_shape, int8_t* out_data) {
   // Check dimensions of the tensors.
   TFLITE_DCHECK_EQ(in_shape.DimensionsCount(), 4);
   TFLITE_DCHECK_EQ(f_shape.DimensionsCount(), 4);
@@ -404,16 +424,16 @@ void DepthwiseConvPerChannel(
   TFLITE_DCHECK_EQ(bias_shape.FlatSize(), out_d);
 
   // Copy filter and bias to dtcm.
-  // Copy filter and bias to dtcm.
-  auto f_data_copy = make_aligned_array<int8_t>(16, f_shape.FlatSize(), f_data);
+  auto f_data_copy = make_aligned_array<int8_t>(16, f_shape.FlatSize());
   // TODO(davidgao): if allocation fails, don't copy, use orig
   TFLITE_DCHECK_NE(f_data_copy, nullptr);
-
+  Memcpy(f_data_copy.get(), f_data, sizeof(int8_t) * f_shape.FlatSize());
   aligned_array<int32_t> bias_data_copy;
   if (bias_data) {
-    bias_data_copy = make_aligned_array<int32_t>(16, out_d, bias_data);
+    bias_data_copy = make_aligned_array<int32_t>(16, out_d);
     // TODO(davidgao): if allocation fails, don't copy, use orig
     TFLITE_DCHECK_NE(bias_data_copy, nullptr);
+    Memcpy(bias_data_copy.get(), bias_data, sizeof(int32_t) * out_d);
   }
 
   // Shifting from quantization params.
@@ -434,12 +454,12 @@ void DepthwiseConvPerChannel(
   DepthwiseConvPerChannelPatch(
       params, output_multiplier, shift_left.get(), shift_right.get(), in_shape,
       in_data, f_shape, f_data_copy.get(), bias_shape, bias_data_copy.get(),
-      out_shape, out_data, 0, out_y_top, 0, out_w, accs_buf);
+      out_shape, out_data, 0, out_y_top, 0, out_w);
   // Middle-left
   DepthwiseConvPerChannelPatch(
       params, output_multiplier, shift_left.get(), shift_right.get(), in_shape,
       in_data, f_shape, f_data_copy.get(), bias_shape, bias_data_copy.get(),
-      out_shape, out_data, out_y_top, out_y_bottom, 0, out_x_left, accs_buf);
+      out_shape, out_data, out_y_top, out_y_bottom, 0, out_x_left);
   // Center
   do {
     if ((f_h == 3) && (f_w == 3)) {
@@ -448,7 +468,7 @@ void DepthwiseConvPerChannel(
             params, output_multiplier, shift_left.get(), shift_right.get(),
             in_shape, in_data, f_shape, f_data_copy.get(), bias_shape,
             bias_data_copy.get(), out_shape, out_data, out_y_top, out_y_bottom,
-            out_x_left, out_x_right, accs_buf);
+            out_x_left, out_x_right);
         break;
       }
       // More variations to be added here
@@ -457,48 +477,18 @@ void DepthwiseConvPerChannel(
         params, output_multiplier, shift_left.get(), shift_right.get(),
         in_shape, in_data, f_shape, f_data_copy.get(), bias_shape,
         bias_data_copy.get(), out_shape, out_data, out_y_top, out_y_bottom,
-        out_x_left, out_x_right, accs_buf);
+        out_x_left, out_x_right);
   } while (false);
   // Middle-right
   DepthwiseConvPerChannelPatch(
       params, output_multiplier, shift_left.get(), shift_right.get(), in_shape,
       in_data, f_shape, f_data_copy.get(), bias_shape, bias_data_copy.get(),
-      out_shape, out_data, out_y_top, out_y_bottom, out_x_right, out_w, accs_buf);
+      out_shape, out_data, out_y_top, out_y_bottom, out_x_right, out_w);
   // Bottom
   DepthwiseConvPerChannelPatch(
       params, output_multiplier, shift_left.get(), shift_right.get(), in_shape,
       in_data, f_shape, f_data_copy.get(), bias_shape, bias_data_copy.get(),
-      out_shape, out_data, out_y_bottom, out_h, 0, out_w, accs_buf);
-}
-
-void* DepthwiseConvInit(TfLiteContext* context, const char* buffer, size_t length) {
-  TFLITE_DCHECK(context->AllocatePersistentBuffer != nullptr);
-  return context->AllocatePersistentBuffer(context, sizeof(OpDataConvCustom));
-}
-
-TfLiteStatus DepthwiseConvPrepare(TfLiteContext* context, TfLiteNode* node) {
-  TF_LITE_ENSURE_OK(context, tflite::DepthwiseConvPrepare(context, node));
-
-  OpDataConvCustom* data = static_cast<OpDataConvCustom*>(node->user_data);
-  tflite::MicroContext* micro_context = tflite::GetMicroContext(context);
-  TfLiteTensor* output =
-      micro_context->AllocateTempOutputTensor(node, kDepthwiseConvOutputTensor);
-  TF_LITE_ENSURE(context, output != nullptr);
-
-  const int batches = output->dims->data[0];
-  const int output_height = output->dims->data[1];
-  const int output_width = output->dims->data[2];
-  const int output_depth = output->dims->data[3];
-
-  size_t required_bytes =
-      batches * output_height * output_width * output_depth * sizeof(int32_t);
-
-  TF_LITE_ENSURE_STATUS(context->RequestScratchBufferInArena(
-      context, required_bytes, &data->accs_buffer_index));
-
-  micro_context->DeallocateTempTfLiteTensor(output);
-
-  return kTfLiteOk;
+      out_shape, out_data, out_y_bottom, out_h, 0, out_w);
 }
 
 TfLiteStatus DepthwiseConvEval(TfLiteContext* context, TfLiteNode* node) {
@@ -507,11 +497,7 @@ TfLiteStatus DepthwiseConvEval(TfLiteContext* context, TfLiteNode* node) {
 
   const auto& params =
       *(reinterpret_cast<TfLiteDepthwiseConvParams*>(node->builtin_data));
-  const auto& data = *(static_cast<const OpDataConvCustom*>(node->user_data));
-
-  int32_t* accs_buf = static_cast<int32_t*>(
-      context->GetScratchBuffer(context, data.accs_buffer_index));
-  TFLITE_DCHECK_NE(accs_buf, nullptr);
+  const auto& data = *(static_cast<const OpDataConv*>(node->user_data));
 
   TfLiteEvalTensor* output =
       GetEvalOutput(context, node, kDepthwiseConvOutputTensor);
@@ -534,7 +520,7 @@ TfLiteStatus DepthwiseConvEval(TfLiteContext* context, TfLiteNode* node) {
               GetTensorShape(input), GetTensorData<int8_t>(input),
               GetTensorShape(filter), GetTensorData<int8_t>(filter),
               GetTensorShape(bias), GetOptionalTensorData<int32_t>(bias),
-              GetTensorShape(output), GetTensorData<int8_t>(output), accs_buf);
+              GetTensorShape(output), GetTensorData<int8_t>(output));
           break;
         }
         default:
@@ -555,8 +541,6 @@ TfLiteStatus DepthwiseConvEval(TfLiteContext* context, TfLiteNode* node) {
 
 TFLMRegistration Register_DEPTHWISE_CONV_2D() {
   auto registration = tflite::Register_DEPTHWISE_CONV_2D();
-  registration.init = DepthwiseConvInit;
-  registration.prepare = DepthwiseConvPrepare;
   registration.invoke = DepthwiseConvEval;
   return registration;
 }

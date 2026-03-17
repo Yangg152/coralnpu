@@ -157,7 +157,7 @@ class CoreMiniAxiInterface:
                clock_ns=1.25,
                csr_base_addr=0x30000,
                ext_mem_base_addr = 0x20000000,
-               ext_mem_size=(4 * 1024 * 1024),
+               ext_mem_size=(16 * 1024 * 1024),
                **kwargs):
     self.dut = dut
     self.dut.io_aclk.value = 0

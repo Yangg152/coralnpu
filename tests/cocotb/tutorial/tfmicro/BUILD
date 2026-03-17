@@ -466,3 +466,103 @@ cocotb_test_suite(
     vcs_verilog_sources = ["//hdl/chisel/src/coralnpu:rvv_core_mini_highmem_axi_cc_library_verilog"],
     verilator_model = "//tests/cocotb:rvv_core_mini_highmem_axi_model",
 )
+
+# ==============================================================================
+# 6. Pooling Test
+# ==============================================================================
+
+coralnpu_v2_binary(
+    name = "pooling_test",
+    srcs = ["pooling_test.cc"],
+    itcm_size_kbytes = 1024,  # Highmem
+    dtcm_size_kbytes = 1024,  # Highmem
+    deps = [
+        "//sw/opt/litert-micro:pooling", 
+        "//sw/opt/litert-micro:depthwise_conv",
+        "@tflite_micro//tensorflow/lite/kernels/internal:reference_base"
+    ],
+)
+
+cocotb_test_suite(
+    name = "cocotb_pooling",
+    simulators = [
+        "verilator",
+        "vcs",
+    ],
+    testcases = [
+        "test_01_global_pooling_small",
+        "test_02_global_pooling_batch",
+        "test_model_mobilenet_gap",
+    ],
+    tests_kwargs = {
+        "waves": False,
+        "hdl_toplevel": "RvvCoreMiniHighmemAxi",
+        "size": "enormous",
+        "default_testcase_size": "medium",
+        "test_module": ["cocotb_pooling.py"],
+        "deps": [
+            "//coralnpu_test_utils:core_mini_axi_sim_interface",
+            "//coralnpu_test_utils:sim_test_fixture",
+            "@rules_python//python/runfiles",
+        ],
+        "data": ["pooling_test.elf"],
+    },
+    vcs_build_args = VCS_BUILD_ARGS,
+    vcs_data = glob(["**/*.elf"]) + [
+        "//tests/cocotb:coverage_exclude.cfg",
+    ],
+    vcs_defines = VCS_DEFINES,
+    vcs_test_args = VCS_TEST_ARGS,
+    vcs_verilog_sources = ["//hdl/chisel/src/coralnpu:rvv_core_mini_highmem_axi_cc_library_verilog"],
+    verilator_model = "//tests/cocotb:rvv_core_mini_highmem_axi_model",
+)
+
+# ==============================================================================
+# 6. Pfully_connected Test
+# ==============================================================================
+
+coralnpu_v2_binary(
+    name = "fully_connected_test",
+    srcs = ["fully_connected_test.cc"],
+    itcm_size_kbytes = 1024,  # Highmem
+    dtcm_size_kbytes = 1024,  # Highmem
+    deps = [
+        "//sw/opt/litert-micro:fully_connected", 
+        "//sw/opt/litert-micro:depthwise_conv",
+        "@tflite_micro//tensorflow/lite/kernels/internal:reference_base"
+    ],
+)
+
+cocotb_test_suite(
+    name = "cocotb_fully_connected",
+    simulators = [
+        "verilator",
+        "vcs",
+    ],
+    testcases = [
+        "test_01_global_pooling_small",
+        "test_02_global_pooling_batch",
+        "test_model_mobilenet_gap",
+    ],
+    tests_kwargs = {
+        "waves": False,
+        "hdl_toplevel": "RvvCoreMiniHighmemAxi",
+        "size": "enormous",
+        "default_testcase_size": "medium",
+        "test_module": ["cocotb_fully_connected.py"],
+        "deps": [
+            "//coralnpu_test_utils:core_mini_axi_sim_interface",
+            "//coralnpu_test_utils:sim_test_fixture",
+            "@rules_python//python/runfiles",
+        ],
+        "data": ["fully_connected_test.elf"],
+    },
+    vcs_build_args = VCS_BUILD_ARGS,
+    vcs_data = glob(["**/*.elf"]) + [
+        "//tests/cocotb:coverage_exclude.cfg",
+    ],
+    vcs_defines = VCS_DEFINES,
+    vcs_test_args = VCS_TEST_ARGS,
+    vcs_verilog_sources = ["//hdl/chisel/src/coralnpu:rvv_core_mini_highmem_axi_cc_library_verilog"],
+    verilator_model = "//tests/cocotb:rvv_core_mini_highmem_axi_model",
+)

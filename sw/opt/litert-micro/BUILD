@@ -30,22 +30,6 @@ cc_library(
 )
 
 cc_library(
-    name = "conv",
-    srcs = [
-        "conv.cc",
-    ],
-    hdrs = ["conv.h"],
-    target_compatible_with = ["//platforms/cpu:coralnpu_v2"],
-    deps = [
-        ":accumulator_util",
-        ":memory_util",
-        "//sw/opt:rvv_opt",
-        "@tflite_micro//tensorflow/lite/kernels/internal:common",
-        "@tflite_micro//tensorflow/lite/micro:op_resolvers",
-    ],
-)
-
-cc_library(
     name = "memory_util",
     hdrs = ["memory_util.h"],
     target_compatible_with = ["//platforms/cpu:coralnpu_v2"],
@@ -116,6 +100,39 @@ cc_library(
     ],
     hdrs = ["mean.h"],
     target_compatible_with = ["//platforms/cpu:coralnpu_v2"],
+    deps = [
+        "//sw/opt:rvv_opt",
+        "@tflite_micro//tensorflow/lite/micro:op_resolvers",
+        "@tflite_micro//tensorflow/lite/kernels/internal:reference",
+        "@tflite_micro//tensorflow/lite/micro:micro_framework",
+        "@tflite_micro//tensorflow/lite/micro/kernels:micro_ops",
+    ],
+)
+
+cc_library(
+    name = "pooling",
+    srcs = [
+        "accumulator_util.h",
+        "pooling.cc",
+    ],
+    hdrs = ["pooling.h"],
+    target_compatible_with = ["//platforms/cpu:coralnpu_v2"], 
+    deps = [
+        "//sw/opt:rvv_opt",
+        "@tflite_micro//tensorflow/lite/kernels/internal:reference",
+        "@tflite_micro//tensorflow/lite/micro:micro_framework",
+        "@tflite_micro//tensorflow/lite/micro/kernels:micro_ops",
+    ],
+)
+
+cc_library(
+    name = "fully_connected",
+    srcs = [
+        "accumulator_util.h",
+        "fully_connected.cc",
+    ],
+    hdrs = ["fully_connected.h"],
+    target_compatible_with = ["//platforms/cpu:coralnpu_v2"], 
     deps = [
         "//sw/opt:rvv_opt",
         "@tflite_micro//tensorflow/lite/micro:op_resolvers",
