@@ -5,7 +5,7 @@
 `include "rvv_backend_sva.svh"
 `endif
 
- module rvv_backend_mxu (
+ module rvv_backend_mxu_wrapper (
 );
 
 
