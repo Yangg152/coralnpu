@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 
-module mmu_tb;
+module mxu_tb;
 
 localparam CLK_HALF = 5;
 
@@ -30,7 +30,7 @@ wire         result_valid;
 wire         mfence_done;
 
 // 显式连线实例化
-mmu u_mmu (
+mxu u_mxu (
     .clk          (clk),
     .rst_n        (rst_n),
     .op_type      (op_type),
@@ -265,13 +265,13 @@ initial begin
 end
 
 // initial begin
-//     $dumpfile("mmu_wave.vcd");
-//     $dumpvars(0, mmu_tb);
+//     $dumpfile("mxu_wave.vcd");
+//     $dumpvars(0, mxu_tb);
 // end
 
 initial begin
-    $fsdbDumpfile("FSDB/mmu_wave.fsdb");
-    $fsdbDumpvars(0, mmu_tb);
+    $fsdbDumpfile("FSDB/mxu_wave.fsdb");
+    $fsdbDumpvars(0, mxu_tb);
     $fsdbDumpMDA(); // 这一句非常重要，用于导出多维数组(Memory/Array)的波形
 end
 

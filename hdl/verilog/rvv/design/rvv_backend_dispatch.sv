@@ -57,12 +57,6 @@ module rvv_backend_dispatch
     rd_index_dp2vrf,        
     rd_data_vrf2dp,
     v0_mask_vrf2dp,
-    //luoyang_start
-    // [新增] Dispatch unit to MXU reservation station
-    rs_valid_dp2mxu,
-    rs_dp2mxu,
-    rs_ready_mxu2dp,   
-    //luoyang_end 
     rob_entry
 );  
 // ---port definition-------------------------------------------------
@@ -123,11 +117,6 @@ module rvv_backend_dispatch
 // Dispatch unit accept all ROB entry to determine if vs_data of RS is from ROB or not
 // ROB unit to Dispatch unit
     input  ROB2DP_t     [`ROB_DEPTH-1:0]          rob_entry;
-
-// MXU端口定义
-    output logic          [`NUM_DP_UOP-1:0]       rs_valid_dp2mxu;
-    output MXU_RS_t       [`NUM_DP_UOP-1:0]       rs_dp2mxu;      // 使用之前定义的 MXU_RS_t
-    input  logic          [`NUM_DP_UOP-1:0]       rs_ready_mxu2dp;
 
 // ---internal signal definition--------------------------------------
     SUC_UOP_RAW_t       [`NUM_DP_UOP-1:0]   suc_uop;
@@ -301,9 +290,6 @@ module rvv_backend_dispatch
         .rs_ready_lsu2dp        (rs_ready_lsu2dp),
         .mapinfo_valid_dp2lsu   (mapinfo_valid_dp2lsu),
         .mapinfo_ready_lsu2dp   (mapinfo_ready_lsu2dp),
-        // [新增] MXU Handshake signals (需要在 ctrl 模块内部实现 enable 逻辑)
-        .rs_valid_dp2mxu        (rs_valid_dp2mxu),
-        .rs_ready_mxu2dp        (rs_ready_mxu2dp),  
         .uop_valid_dp2rob       (uop_valid_dp2rob),      
         .uop_ready_rob2dp       (uop_ready_rob2dp)
     );
@@ -453,31 +439,6 @@ module rvv_backend_dispatch
             assign mapinfo_dp2lsu[i].rob_entry           = rob_address[i];
             assign mapinfo_dp2lsu[i].lsu_class           = uop_uop2dp[i].uop_funct6.lsu_funct6.lsu_is_store;
             assign mapinfo_dp2lsu[i].vregfile_write_addr = uop_uop2dp[i].vd_index;
-
-           // MXU RS Payload Assignment
-           // 对应 rvv_backend.svh 中 MXU_RS_t 的定义
-`ifdef TB_SUPPORT
-            assign rs_dp2mxu[i].uop_pc         = uop_uop2dp[i].uop_pc; 
-`endif
-            assign rs_dp2mxu[i].rob_entry      = rob_address[i]; 
-            assign rs_dp2mxu[i].uop_funct6     = uop_uop2dp[i].uop_funct6;
-            assign rs_dp2mxu[i].uop_funct3     = uop_uop2dp[i].uop_funct3;
-            // 1. Control Packet (直接传递打包好的控制结构体)
-            assign rs_dp2mxu[i].ctrl           = uop_uop2dp[i].mxu_ctrl;
-            // 2. Source 1: Input Activations (对应指令的 vs2 字段)
-            // Dispatch 模块已经从 VRF 读出了 vs2 的数据放在 uop_operand[i].vs2 中
-            assign rs_dp2mxu[i].vs2_data       = uop_operand[i].vs2; 
-            assign rs_dp2mxu[i].vs2_data_valid = uop_uop2dp[i].vs2_valid;
-           // 3. Source 2: Accumulator / Old Value (对应指令的 vd 字段，用于读改写)
-            // 当 decode 阶段设置了 vs3_valid=1 时，uop_operand[i].vd 中会包含 vd 的旧值
-            assign rs_dp2mxu[i].vd_old_data       = uop_operand[i].vd; 
-            assign rs_dp2mxu[i].vd_old_data_valid = uop_uop2dp[i].vs3_valid;
-            // 4. Source 3: Weight Pointer (对应指令的 rs1 字段)
-            assign rs_dp2mxu[i].rs1_data       = uop_uop2dp[i].rs1_data;
-            assign rs_dp2mxu[i].rs1_data_valid = uop_uop2dp[i].rs1_data_valid;
-            // 5. Destination Index
-            assign rs_dp2mxu[i].vd_index       = uop_uop2dp[i].vd_index;
-            assign rs_dp2mxu[i].uop_index      = uop_uop2dp[i].uop_index;
 
           // ROB
 `ifdef TB_SUPPORT

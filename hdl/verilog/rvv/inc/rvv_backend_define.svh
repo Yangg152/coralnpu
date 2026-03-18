@@ -29,9 +29,6 @@
   `define MUL_RS_DEPTH          8
   `define DIV_RS_DEPTH          8
   `define LSU_RS_DEPTH          8
-  //luoyang_start
-  `define MXU_RS_DEPTH          8
-  //luoyang_end
   `define ROB_DEPTH             8
 
 `elsif ISSUE_2_READ_PORT_6
@@ -51,7 +48,6 @@
   `define MUL_RS_DEPTH          4
   `define DIV_RS_DEPTH          4
   `define LSU_RS_DEPTH          4
-  `define MXU_RS_DEPTH          4  // [新增] 2发射模式
   `define ROB_DEPTH             8
 
 `else  //ISSUE_2_READ_PORT_4
@@ -71,7 +67,6 @@
   `define MUL_RS_DEPTH          4
   `define DIV_RS_DEPTH          4
   `define LSU_RS_DEPTH          4
-  `define MXU_RS_DEPTH          4  // [新增] 默认模式
   `define ROB_DEPTH             8
 `endif
 
@@ -87,9 +82,8 @@
 `define NUM_MUL                 2
 `define NUM_PMTRDT              1
 `define NUM_DIV                 1
-`define NUM_MXU                 1  // [新增] 定义 MXU 数量
 // `define NUM_PU                  `NUM_ALU+`NUM_PMTRDT+`NUM_MUL+`NUM_DIV+`NUM_LSU
-`define NUM_PU                  `NUM_ALU+`NUM_PMTRDT+`NUM_MUL+`NUM_DIV+`NUM_LSU+`NUM_MXU
+`define NUM_PU                  `NUM_ALU+`NUM_PMTRDT+`NUM_MUL+`NUM_DIV+`NUM_LSU
  
 // Reservation Station data width
 `define ALU_RS_WIDTH            $bits(ALU_RS_t)

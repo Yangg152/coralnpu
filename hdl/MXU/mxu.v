@@ -1,5 +1,5 @@
 `timescale 1ns / 1ps
-module mmu (
+module mxu (
     input  wire        clk,
     input  wire        rst_n,
 

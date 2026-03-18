@@ -25,9 +25,6 @@ module rvv_backend_dispatch_ctrl
     rs_ready_lsu2dp,
     mapinfo_valid_dp2lsu,
     mapinfo_ready_lsu2dp,
-    // [新增] MXU 端口定义
-    rs_valid_dp2mxu,
-    rs_ready_mxu2dp,
     
     uop_valid_dp2rob,
     uop_ready_rob2dp
@@ -54,10 +51,6 @@ module rvv_backend_dispatch_ctrl
     input   logic         [`NUM_DP_UOP-1:0] rs_ready_lsu2dp;
     output  logic         [`NUM_DP_UOP-1:0] mapinfo_valid_dp2lsu;
     input   logic         [`NUM_DP_UOP-1:0] mapinfo_ready_lsu2dp;
-
-    // [新增] MXU 握手信号声明
-    output  logic         [`NUM_DP_UOP-1:0] rs_valid_dp2mxu;
-    input   logic         [`NUM_DP_UOP-1:0] rs_ready_mxu2dp;
 
     output  logic         [`NUM_DP_UOP-1:0] uop_valid_dp2rob;
     input   logic         [`NUM_DP_UOP-1:0] uop_ready_rob2dp;
@@ -116,8 +109,6 @@ module rvv_backend_dispatch_ctrl
                     RDT: rs_ready[0] = rs_ready_pmtrdt2dp[0];
                     DIV: rs_ready[0] = rs_ready_div2dp[0];
                     LSU: rs_ready[0] = rs_ready_lsu2dp[0] & mapinfo_ready_lsu2dp[0];
-                    // [新增] 处理 MXU 的 Ready 信号
-                    MXU: rs_ready[0] = rs_ready_mxu2dp[0];
                     default: rs_ready[0] = 1'b0;
                 endcase
             end
@@ -132,8 +123,6 @@ module rvv_backend_dispatch_ctrl
                     RDT: rs_ready[i] = rs_ready[i-1] & rs_ready_pmtrdt2dp[i];
                     DIV: rs_ready[i] = rs_ready[i-1] & rs_ready_div2dp[i];
                     LSU: rs_ready[i] = rs_ready[i-1] & rs_ready_lsu2dp[i] & mapinfo_ready_lsu2dp[i];
-                    // [新增] 级联处理 MXU Ready 信号
-                    MXU: rs_ready[i] = rs_ready[i-1] & rs_ready_mxu2dp[i];
                     default: rs_ready[i] = 1'b0;
                 endcase
             end
@@ -165,10 +154,6 @@ module rvv_backend_dispatch_ctrl
                                              (uop_ctrl[i].uop_exe_unit == LSU);
             assign mapinfo_valid_dp2lsu[i] = uop_valid_dp2rob[i] & 
                                              (uop_ctrl[i].uop_exe_unit == LSU);
-
-            // [新增] 生成 MXU Valid 信号
-            assign rs_valid_dp2mxu[i]      = uop_ready_dp2uop[i] & 
-                                             (uop_ctrl[i].uop_exe_unit == MXU);
         end
     endgenerate
     

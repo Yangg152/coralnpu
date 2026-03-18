@@ -124,10 +124,6 @@ module rvv_backend_decode_unit_ari
   logic   [`NUM_DE_UOP-1:0][$clog2(`EMUL_MAX)-1:0]    seg_field_index;
   logic   [`NUM_DE_UOP-1:0]                           pshrob_valid;
   
-  // luoyang_start
-  MXU_CTRL_t      [`NUM_DE_UOP-1:0]                   mxu_ctrl;
-  // luoyang_end
-
   // use for for-loop 
   genvar                                              j;
 
@@ -172,22 +168,6 @@ module rvv_backend_decode_unit_ari
       end
     endcase
   end 
-
-  // luoyang_start
-  // decode MXU control signals
-  always_comb begin
-    for(int i=0; i<`NUM_DE_UOP; i++) begin: GET_MXU_CTRL
-      mxu_ctrl[i] = '0;
-      if (inst_valid) begin
-        case(funct6_ari.ari_funct6)
-          MXU_OP_WLOAD:     mxu_ctrl[i].subop = MXU_SUBOP_WLOAD;
-          MXU_OP_MMA_DEEP:  mxu_ctrl[i].subop = MXU_SUBOP_DEEP;
-          MXU_OP_MMA_GEMM4: mxu_ctrl[i].subop = MXU_SUBOP_GEMM4;
-        endcase
-      end
-    end
-  end
-  // luoyang_end
 
   // get EMUL
   always_comb begin
@@ -3197,16 +3177,6 @@ module rvv_backend_decode_unit_ari
             VCOMPRESS: begin
               uop_exe_unit[i] = PMT;
             end
-
-            // luoyang_start
-            MXU_OP_WLOAD: begin
-              uop_exe_unit[i] = LSU;
-            end
-            MXU_OP_MMA_DEEP,
-            MXU_OP_MMA_GEMM4: begin
-              uop_exe_unit[i] = MXU;
-            end
-            // luoyang_end
           endcase
         end
       endcase
@@ -3593,16 +3563,6 @@ module rvv_backend_decode_unit_ari
               endcase
             end
 
-            // luoyang_start
-            MXU_OP_WLOAD: begin
-              uop_class[i] = XVX;
-            end
-            MXU_OP_MMA_DEEP,
-            MXU_OP_MMA_GEMM4: begin
-              // Assuming MMA uses vs2, vd (accumulator) and maybe rs1 for config/pointer
-              uop_class[i] = XVX; // Adjust as per specific operand requirements
-            end
-            // luoyang_end
           endcase
         end
       endcase
@@ -4908,14 +4868,6 @@ module rvv_backend_decode_unit_ari
             VWRXUNARY0,
             VSLIDE1UP,
             VSLIDE1DOWN,
-            MXU_OP_WLOAD: begin
-              case(inst_funct3)
-                OPMVX: begin
-                  rs1_data[i]       = rs1;
-                  rs1_data_valid[i] = 1'b1;
-                end
-              endcase
-            end
           endcase
         end
       endcase
@@ -5017,9 +4969,6 @@ module rvv_backend_decode_unit_ari
       assign uop[j].seg_field_index     = seg_field_index[j];   
       assign uop[j].pshrob_valid        = pshrob_valid[j];
       
-      // luoyang_start
-      assign uop[j].mxu_ctrl            = mxu_ctrl[j];
-      // luoyang_end   
     end
   endgenerate
 
