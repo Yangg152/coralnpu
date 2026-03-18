@@ -96,33 +96,8 @@ typedef enum logic [3:0] {
   RDT,
   CMP,
   DIV,
-  LSU,
-  //luoyang_start
-  MXU
-  //luoyang_end
+  LSU
 } EXE_UNIT_e;
-
-// luoyang_start
-// =========================================================================
-// [Flex-MXU Definitions v3.0 - Stateless Edition]
-// Optimized for Deep Mode (16x16) and Spatial Mode (GEMM-4)
-// =========================================================================
-
-// MXU Sub-opcode strictly aligned with ISA v3.0
-typedef enum logic [2:0] {
-  MXU_NOP         = 3'b000,
-  MXU_SUBOP_DEEP  = 3'b001, // 16x16 Deep Mode (M=1, K=16, N=16)
-  MXU_SUBOP_WLOAD = 3'b010, // Weight Load (LSU Snooping Bypass)
-  MXU_SUBOP_GEMM4 = 3'b011  // 4x4x16 Spatial Mode (GEMM-4)
-} mxu_subop_e;
-
-typedef struct packed {
-  mxu_subop_e    subop;       // Controls Datapath MUX & Tiling Logic
-  logic          acc_en;      // Fused Accumulation Control:
-                              // 0: Overwrite (Vd = Vs2 * W)
-                              // 1: Accumulate (Vd = Vd + Vs2 * W)
-} MXU_CTRL_t;
-// luoyang_end
 
 // when EXE_UNIT_e is not LSU, it is used to distinguish arithmetic instructions, based on inst_encoding[14:12]
   parameter  OPIVV=3'b000;      // vs2,      vs1, vd.
@@ -233,15 +208,6 @@ typedef struct packed {
   parameter VWMACC          =   6'b111_101;
   parameter VWMACCUS        =   6'b111_110;
   parameter VWMACCSU        =   6'b111_111;  
-
-  // luoyang_start
-  // =========================================================================
-  // Flex-MXU Instruction Opcodes (Funct6 Definitions)
-  // =========================================================================
-  parameter MXU_OP_MMA_DEEP  = 6'b001_101; // Funct6: 13
-  parameter MXU_OP_MMA_GEMM4 = 6'b010_101; // Funct6: 21
-  parameter MXU_OP_WLOAD     = 6'b010_110; // Funct6: 22 (Dispatched to LSU)
-  // luoyang_end  
 
 // vwxunary0, the uop could be vcpop.m, vfirst.m and vmv. They can be distinguished by vs1 field(inst_encoding[19:15]).
   parameter VMV_X_S         =   5'b00000;
@@ -406,10 +372,6 @@ typedef struct packed {
   logic   [$clog2(`EMUL_MAX)-1:0]     seg_field_index;    // used for calculate v0_start in DP stage for segment ld/st
   logic                               pshrob_valid;       // wheather this uop is pushed into ROB.
 
-  // luoyang_start
-  // [Added for Flex-MXU] Pass decoded MXU control signals to Dispatch/RS
-  MXU_CTRL_t                          mxu_ctrl;
-  // luoyang_end
 } UOP_QUEUE_t;    
 
 // specify whether the current byte belongs to 'prestart' or 'body-inactive' or 'body-active' or 'tail'
@@ -565,12 +527,6 @@ typedef struct packed {
   logic                               v0_valid;
   logic   [`VLENB-1:0]                v0_data;              
 
-  // luoyang_start
-  // [Antigravity Fix] Flex-MXU Snooping Protocol
-  // LSU only needs to know this transaction bypasses VRF. 
-  // Address calculation happens in AGU (mapped to vidx_addr/rs1).
-  logic                               is_mxu_wload;         
-  // luoyang_end
 } UOP_RVV2LSU_t;     
 
 
@@ -584,15 +540,6 @@ typedef struct packed {
   logic   [`ROB_DEPTH_WIDTH-1:0]      rob_entry;
   logic   [`VLEN-1:0]                 w_data;             
   logic                               w_valid;
-  // luoyang_start
-  // [Review] Used for dedicated forwarding path if needed, 
-  // otherwise retire uses rob_entry mapping.
-  logic   [`REGFILE_INDEX_WIDTH-1:0]  rd_index; 
-  // luoyang_end
-  logic   [`VLENB-1:0]                vsaturate;
-  // luoyang_start
-  logic   [`VLENB-1:0]                v0_mask; 
-  // luoyang_end
 } PU2ROB_t;  
 
 // lsu uop info to remap rob_entry for UOP_LSU2RVV_t
@@ -613,18 +560,11 @@ typedef struct packed {
   logic   [`UOP_INDEX_WIDTH-1:0]      uop_index;         
 `endif
   // For standard load data
-  logic                               vregfile_write_valid; // MUST BE 0 for MXU_WLOAD
+  logic                               vregfile_write_valid; 
   logic	[`REGFILE_INDEX_WIDTH-1:0] 	  vregfile_write_addr;  
   logic	[`VLEN-1:0] 			          	vregfile_write_data;  	   
   logic                               lsu_vstore_last;
   
-  // luoyang_start
-  // MXU Snooping Ack
-  // Signals ROB to commit, but NO data is written to VRF from LSU.
-  // Data flowed: Mem -> Bus -> LSU -> MXU_SRAM (Snooped)
-  logic                               is_mxu_wload; 
-  // luoyang_end
-
 } UOP_LSU2RVV_t;   
 
 typedef struct packed {
@@ -715,49 +655,5 @@ typedef struct packed {
   logic   [`VLEN-1:0]                 rt_data;
   logic   [`VLENB-1:0]                rt_strobe; 
 }RT2VRF_t;
-
-// luoyang_start
-// =========================================================================
-// MXU Reservation Station Data Structure (v3.0 Optimized)
-// Optimized for Stateless Execution (No CSRs, Instruction Driven)
-// =========================================================================
-typedef struct packed {
-`ifdef TB_SUPPORT
-  logic   [`PC_WIDTH-1:0]             uop_pc;
-`endif
-  logic   [`ROB_DEPTH_WIDTH-1:0]      rob_entry;      
-  
-  FUNCT6_u                            uop_funct6;
-  logic   [`FUNCT3_WIDTH-1:0]         uop_funct3;
-  
-  // Control Signals (Decoded from Instruction)
-  MXU_CTRL_t                          ctrl;
-
-  // Source Operand 1: Activation (INT8)
-  // v3.0 Requirement: 
-  // - Deep Mode: 1x16 Vector
-  // - GEMM4 Mode: 4x4 Spatial Pixels (128-bit packed)
-  logic   [`VLEN-1:0]                 vs2_data;           
-  logic                               vs2_data_valid; 
-  // Note: Backend assumes EEW8 for activations.
-
-  // Source Operand 2: Accumulator (INT32)
-  // Used when ctrl.acc_en = 1.
-  logic   [`VLEN-1:0]                 vd_old_data;	        
-  logic                               vd_old_data_valid; 
-  // Note: Backend assumes EEW32 for accumulator.
-
-  // Source Operand 3: Weight Index / Config
-  // Extracted from rs1 or immediate. Used to address MXU SRAM.
-  logic   [`XLEN-1:0] 	              rs1_data;          
-  logic          	                    rs1_data_valid;   
-
-  // Destination Info
-  logic   [`REGFILE_INDEX_WIDTH-1:0]  vd_index; // Renamed from rd_index
-  logic   [`UOP_INDEX_WIDTH-1:0]      uop_index;
-
-} MXU_RS_t;
-// luoyang_end
-
 
 `endif  // HDL_VERILOG_RVV_DESIGN_RVV_SVH
