@@ -540,6 +540,7 @@ typedef struct packed {
   logic   [`ROB_DEPTH_WIDTH-1:0]      rob_entry;
   logic   [`VLEN-1:0]                 w_data;             
   logic                               w_valid;
+  logic   [`VLENB-1:0]                vsaturate;
 } PU2ROB_t;  
 
 // lsu uop info to remap rob_entry for UOP_LSU2RVV_t

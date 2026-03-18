@@ -4867,7 +4867,14 @@ module rvv_backend_decode_unit_ari
             VASUB,
             VWRXUNARY0,
             VSLIDE1UP,
-            VSLIDE1DOWN,
+            VSLIDE1DOWN: begin
+              case(inst_funct3)
+                OPMVX: begin
+                  rs1_data[i]       = rs1;
+                  rs1_data_valid[i] = 1'b1;
+                end
+              endcase
+            end
           endcase
         end
       endcase
