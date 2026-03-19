@@ -157,3 +157,22 @@ cc_library(
         "@tflite_micro//tensorflow/lite/micro/kernels:micro_ops",
     ],
 )
+
+
+cc_library(
+    name = "mxu",
+    srcs = [
+        "accumulator_util.h",
+        "mxu.cc",
+    ],
+    hdrs = [
+        "mxu.h",
+        "conv.h"
+    ],
+    target_compatible_with = ["//platforms/cpu:coralnpu_v2"], 
+    deps = [
+        ":memory_util",
+        "//sw/opt:rvv_opt",
+        "@tflite_micro//tensorflow/lite/micro:op_resolvers",
+    ],
+)

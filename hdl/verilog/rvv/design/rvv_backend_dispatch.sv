@@ -44,6 +44,11 @@ module rvv_backend_dispatch
     rs_valid_dp2div,
     rs_dp2div,
     rs_ready_div2dp,
+    //luoyang
+    rs_valid_dp2mxu,
+    rs_dp2mxu,
+    rs_ready_mxu2dp,
+    //luoyang
     rs_valid_dp2lsu,
     rs_dp2lsu,
     rs_ready_lsu2dp,
@@ -90,6 +95,12 @@ module rvv_backend_dispatch
     output logic          [`NUM_DP_UOP-1:0]       rs_valid_dp2div;
     output DIV_RS_t       [`NUM_DP_UOP-1:0]       rs_dp2div;
     input  logic          [`NUM_DP_UOP-1:0]       rs_ready_div2dp;
+
+//luoyang
+    output logic          [`NUM_DP_UOP-1:0]       rs_valid_dp2mxu;
+    output MXU_RS_t       [`NUM_DP_UOP-1:0]       rs_dp2mxu;
+    input  logic          [`NUM_DP_UOP-1:0]       rs_ready_mxu2dp;
+//luoyang
 
 // Dispatch unit to LSU 
     // to LSU RS
@@ -286,6 +297,11 @@ module rvv_backend_dispatch
         .rs_ready_mul2dp        (rs_ready_mul2dp),
         .rs_valid_dp2div        (rs_valid_dp2div),
         .rs_ready_div2dp        (rs_ready_div2dp),
+        //luoyang
+        // [新增] 接入 MXU 的握手控制
+        .rs_valid_dp2mxu        (rs_valid_dp2mxu),
+        .rs_ready_mxu2dp        (rs_ready_mxu2dp),
+        //luoyang
         .rs_valid_dp2lsu        (rs_valid_dp2lsu),
         .rs_ready_lsu2dp        (rs_ready_lsu2dp),
         .mapinfo_valid_dp2lsu   (mapinfo_valid_dp2lsu),
@@ -417,6 +433,33 @@ module rvv_backend_dispatch
             assign rs_dp2div[i].vs2_data_valid= uop_uop2dp[i].vs2_valid;
             assign rs_dp2div[i].rs1_data      = uop_uop2dp[i].rs1_data;
             assign rs_dp2div[i].rs1_data_valid= uop_uop2dp[i].rs1_data_valid;
+
+//luoyang
+          // [新增] MXU RS
+`ifdef TB_SUPPORT
+            assign rs_dp2mxu[i].uop_pc         = uop_uop2dp[i].uop_pc; 
+`endif
+            assign rs_dp2mxu[i].rob_entry      = rob_address[i]; 
+            assign rs_dp2mxu[i].uop_funct6     = uop_uop2dp[i].uop_funct6;
+            assign rs_dp2mxu[i].uop_funct3     = uop_uop2dp[i].uop_funct3;
+            
+            assign rs_dp2mxu[i].vs1_data       = uop_operand[i].vs1;
+            assign rs_dp2mxu[i].vs1_data_valid = uop_uop2dp[i].vs1_index_valid;
+            
+            assign rs_dp2mxu[i].vs2_data       = uop_operand[i].vs2;
+            assign rs_dp2mxu[i].vs2_eew        = uop_uop2dp[i].vs2_eew;
+            assign rs_dp2mxu[i].vs2_data_valid = uop_uop2dp[i].vs2_valid;
+            
+            assign rs_dp2mxu[i].vs3_data       = uop_operand[i].vd;
+            assign rs_dp2mxu[i].vs3_data_valid = uop_uop2dp[i].vs3_valid;
+            
+            assign rs_dp2mxu[i].rs1_data       = uop_uop2dp[i].rs1_data;
+            assign rs_dp2mxu[i].rs1_data_valid = uop_uop2dp[i].rs1_data_valid;
+            assign rs_dp2mxu[i].uop_index      = uop_uop2dp[i].uop_index;
+            assign rs_dp2mxu[i].first_uop_valid = uop_uop2dp[i].first_uop_valid;
+            assign rs_dp2mxu[i].last_uop_valid  = uop_uop2dp[i].last_uop_valid;
+            assign rs_dp2mxu[i].vm              = uop_uop2dp[i].vm;
+//luoyang
 
           // LSU RS
 `ifdef TB_SUPPORT

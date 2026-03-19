@@ -96,12 +96,17 @@ typedef enum logic [3:0] {
   RDT,
   CMP,
   DIV,
-  LSU
+  LSU,
+  //luoyang
+  MXU
+  //luoyang
 } EXE_UNIT_e;
 
 // when EXE_UNIT_e is not LSU, it is used to distinguish arithmetic instructions, based on inst_encoding[14:12]
   parameter  OPIVV=3'b000;      // vs2,      vs1, vd.
-  parameter  OPFVV=3'b001;      // vs2,      vs1, vd/rd. float, not support
+  //luoyang
+  // parameter  OPFVV=3'b001;      // vs2,      vs1, vd/rd. float, not support
+  //luoyang
   parameter  OPMVV=3'b010;      // vs2,      vs1, vd/rd.
   parameter  OPIVI=3'b011;      // vs2, imm[4:0], vd.
   parameter  OPIVX=3'b100;      // vs2,      rs1, vd.
@@ -208,6 +213,22 @@ typedef enum logic [3:0] {
   parameter VWMACC          =   6'b111_101;
   parameter VWMACCUS        =   6'b111_110;
   parameter VWMACCSU        =   6'b111_111;  
+
+//luoyang
+  // ==========================================
+  // 【新增】MXU custom instructions
+  // 借用不支持的 OPFVV (3'b001) 作为 MXU 的专属 funct3
+  // 这样 funct6 就可以安全地使用 000_000 ~ 000_110
+  // ==========================================
+  parameter OPMXU           = 3'b001; // 替换原来的 OPFVV 位置，作为 MXU 的专属 funct3
+  parameter MXU_MCFG        = 6'b000_000; // 配置指令
+  parameter MXU_MLOAD_W     = 6'b000_001; // 载入权重指令
+  parameter MXU_MLOAD_A     = 6'b000_010; // 载入激活指令
+  parameter MXU_MZERO       = 6'b000_011; // 累加器清零指令
+  parameter MXU_MMA         = 6'b000_100; // 矩阵乘加指令
+  parameter MXU_MSTORE      = 6'b111_111; // 结果写回指令
+  parameter MXU_MFENCE      = 6'b000_110; // 矩阵同步屏障指令
+//luoyang
 
 // vwxunary0, the uop could be vcpop.m, vfirst.m and vmv. They can be distinguished by vs1 field(inst_encoding[19:15]).
   parameter VMV_X_S         =   5'b00000;
@@ -656,5 +677,42 @@ typedef struct packed {
   logic   [`VLEN-1:0]                 rt_data;
   logic   [`VLENB-1:0]                rt_strobe; 
 }RT2VRF_t;
+
+//luoyang
+// ==========================================
+// 【新增】MXU reservation station struct
+// ==========================================
+typedef struct packed {   
+`ifdef TB_SUPPORT
+  logic   [`PC_WIDTH-1:0]             uop_pc;
+`endif
+  logic   [`ROB_DEPTH_WIDTH-1:0]      rob_entry;      // 用于写回 ROB
+  EXE_UNIT_e                          uop_exe_unit;   // 确认是 MXU
+  FUNCT6_u                            uop_funct6;     // 配合 funct3 区分 mcfg, mload, mma
+  logic   [`FUNCT3_WIDTH-1:0]         uop_funct3;
+  
+  // 标量数据：通常用于 MCFG 配置指令（传递 K 维度等）
+  logic   [`XLEN-1:0]                 rs1_data;          
+  logic                               rs1_data_valid;   
+
+  // 向量数据：用于传递矩阵的行(Act)或权重(Weight)
+  logic   [`VLEN-1:0]                 vs1_data;           
+  logic                               vs1_data_valid; 
+  logic   [`VLEN-1:0]                 vs2_data;	        
+  logic                               vs2_data_valid; 
+  logic   [`VLEN-1:0]                 vs3_data;	      // 如果 MMA 需要 C 矩阵(累加器)的初始值
+  logic                               vs3_data_valid; 
+  
+  EEW_e                               vs2_eew;        // 精度信息（如 int8/fp16）
+  
+  // vm 位：用于 MLOAD_A 传递 is_last 标记 (vm=0 表示 is_last)
+  logic                               vm;
+
+  // 拆分微指令的控制信号
+  logic   [`UOP_INDEX_WIDTH-1:0]      uop_index;      // 当前是矩阵指令的第几个微指令
+  logic                               first_uop_valid;// 标识是否是该矩阵操作的开始
+  logic                               last_uop_valid; // 标识是否是该矩阵操作的结束
+} MXU_RS_t;    
+//luoyang
 
 `endif  // HDL_VERILOG_RVV_DESIGN_RVV_SVH

@@ -89,13 +89,18 @@ typedef enum logic [6:0] {
 
 typedef enum logic [2:0] {
   OPIVV=3'b000,      // vs2,      vs1, vd.
-  OPFVV=3'b001,      // vs2,      vs1, vd/rd. float, not support
+  //luoyang
+  // OPFVV=3'b001,      // vs2,      vs1, vd/rd. float, not support
+  //luoyang
   OPMVV=3'b010,      // vs2,      vs1, vd/rd.
   OPIVI=3'b011,      // vs2, imm[4:0], vd.
   OPIVX=3'b100,      // vs2,      rs1, vd.
   OPFVF=3'b101,      // vs2,      rs1, vd. float, not support
   OPMVX=3'b110,      // vs2,      rs1, vd/rd.
   OPCFG=3'b111       // vset* instructions    
+  //luoyang
+  OPMXU=3'b001
+  //luoyang 
 } alu_type_e;
 
 typedef enum logic [7:0] {

@@ -38,6 +38,11 @@ module rvv_backend_rob
     wr_valid_div2rob,
     wr_div2rob,
     wr_ready_rob2div,
+    //luoyang
+    wr_valid_mxu2rob,
+    wr_mxu2rob,
+    wr_ready_rob2mxu,
+    //luoyang
     wr_valid_lsu2rob,
     wr_lsu2rob,
     wr_ready_rob2lsu,
@@ -83,6 +88,13 @@ module rvv_backend_rob
     input   logic     [`NUM_DIV-1:0]    wr_valid_div2rob;
     input   PU2ROB_t  [`NUM_DIV-1:0]    wr_div2rob;
     output  logic     [`NUM_DIV-1:0]    wr_ready_rob2div;
+
+//luoyang
+// MXU to ROB
+    input   logic     [`NUM_MXU-1:0]    wr_valid_mxu2rob;
+    input   PU2ROB_t  [`NUM_MXU-1:0]    wr_mxu2rob;
+    output  logic     [`NUM_MXU-1:0]    wr_ready_rob2mxu;
+//luoyang    
 
 // LSU to ROB
     input   logic     [`NUM_LSU-1:0]    wr_valid_lsu2rob;
@@ -253,6 +265,19 @@ module rvv_backend_rob
                     res_mem[wr_div2rob[k].rob_entry].vsaturate <= wr_div2rob[k].vsaturate;
                 end
             end
+            //luoyang
+            // [新增] MXU 的写入逻辑
+            for (int k=0; k<`NUM_MXU; k++) begin
+                if (wr_valid_mxu2rob[k] && wr_ready_rob2mxu[k]) begin
+                  `ifdef TB_SUPPORT
+                    res_mem[wr_mxu2rob[k].rob_entry].uop_pc  <= wr_mxu2rob[k].uop_pc;
+                  `endif                
+                    res_mem[wr_mxu2rob[k].rob_entry].w_valid <= wr_mxu2rob[k].w_valid;
+                    res_mem[wr_mxu2rob[k].rob_entry].w_data  <= wr_mxu2rob[k].w_data;
+                    res_mem[wr_mxu2rob[k].rob_entry].vsaturate <= wr_mxu2rob[k].vsaturate;
+                end
+            end
+            //luoyang
             for (int k=0; k<`NUM_LSU; k++) begin
                 if (wr_valid_lsu2rob[k] && wr_ready_rob2lsu[k]) begin
                   `ifdef TB_SUPPORT
@@ -272,6 +297,9 @@ module rvv_backend_rob
         for (i=0; i<`NUM_PMTRDT; i++) assign wr_ready_rob2pmtrdt[i] = 1'b1;
         for (i=0; i<`NUM_MUL; i++) assign wr_ready_rob2mul[i] = 1'b1;
         for (i=0; i<`NUM_DIV; i++) assign wr_ready_rob2div[i] = 1'b1;
+        //luoyang
+        for (i=0; i<`NUM_MXU; i++) assign wr_ready_rob2mxu[i] = 1'b1;
+        //luoyang
         for (i=0; i<`NUM_LSU; i++) assign wr_ready_rob2lsu[i] = 1'b1;
     endgenerate
 
@@ -312,6 +340,13 @@ module rvv_backend_rob
                 if (wr_valid_div2rob[k] && wr_ready_rob2div[k])
                     uop_done[wr_div2rob[k].rob_entry] <= 1'b1;
             end
+            //luoyang
+            // [新增] MXU 更新 uop_done
+            for (int k=0; k<`NUM_MXU; k++) begin
+                if (wr_valid_mxu2rob[k] && wr_ready_rob2mxu[k])
+                    uop_done[wr_mxu2rob[k].rob_entry] <= 1'b1;
+            end 
+            //luoyang
             for (int k=0; k<`NUM_LSU; k++) begin
                 if (wr_valid_lsu2rob[k] && wr_ready_rob2lsu[k])
                     uop_done[wr_lsu2rob[k].rob_entry] <= 1'b1;
@@ -333,6 +368,10 @@ module rvv_backend_rob
                 assign res_sel[i][j+`NUM_MUL+`NUM_PMTRDT+`NUM_ALU]          = wr_valid_div2rob[j]    && wr_ready_rob2div[j]    && (wr_div2rob[j].rob_entry == i);
             for (j=0; j<`NUM_LSU; j++)    
                 assign res_sel[i][j+`NUM_DIV+`NUM_MUL+`NUM_PMTRDT+`NUM_ALU] = wr_valid_lsu2rob[j]    && wr_ready_rob2lsu[j]    && (wr_lsu2rob[j].rob_entry == i);
+            //luoyang
+            for (j=0; j<`NUM_MXU; j++)    
+                assign res_sel[i][j+`NUM_LSU+`NUM_DIV+`NUM_MUL+`NUM_PMTRDT+`NUM_ALU] = wr_valid_mxu2rob[j] && wr_ready_rob2mxu[j] && (wr_mxu2rob[j].rob_entry == i);
+            //luoyang    
             `rvv_expect($onehot0(res_sel[i])) else $error("ROB: Multiple PU results write same entry: index %d, PU %d\n", i, $sampled(res_sel[i]));
         end
     endgenerate

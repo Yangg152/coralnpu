@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 // Decode: Contains decode logic to be forwarded to the appropriate functional
 // block. A serialization mechanism is introduced to stall a decoded instruction
 // from bring presented to the functional block until next cycle if the block has

@@ -123,7 +123,11 @@ module rvv_backend_decode_unit_ari
   logic   [`NUM_DE_UOP-1:0]                           last_uop_valid;     
   logic   [`NUM_DE_UOP-1:0][$clog2(`EMUL_MAX)-1:0]    seg_field_index;
   logic   [`NUM_DE_UOP-1:0]                           pshrob_valid;
-  
+
+  //luoyang
+  logic valid_mxu;
+  //luoyang  
+
   // use for for-loop 
   genvar                                              j;
 
@@ -151,23 +155,33 @@ module rvv_backend_decode_unit_ari
   // decode arithmetic instruction funct6
   assign funct6_ari.ari_funct6 = inst_valid ? inst_funct6 : 'b0;
 
+  //luoyang
   always_comb begin
-    // initial the data
     valid_opi = 'b0;
     valid_opm = 'b0;
+    valid_mxu = 'b0;
     
     case(inst_funct3)
       OPIVV,
-      OPIVX,
-      OPIVI: begin
+      OPIVX: begin
         valid_opi = inst_valid;
+      end
+      OPIVI: begin
+        if (inst_funct6 == MXU_MSTORE)
+          valid_mxu = inst_valid;
+        else
+          valid_opi = inst_valid;
       end
       OPMVV,
       OPMVX: begin
         valid_opm = inst_valid;
       end
+      OPMXU: begin
+        valid_mxu = inst_valid;
+      end
     endcase
-  end 
+  end
+  //luoyang
 
   // get EMUL
   always_comb begin
@@ -796,6 +810,32 @@ module rvv_backend_decode_unit_ari
               end
             endcase
           end
+          //luoyang
+          MXU_MSTORE: begin
+            case(csr_lmul)
+              LMUL1_4, LMUL1_2, LMUL1: begin
+                emul_vd  = EMUL1;
+                emul_vs2 = EMUL1;
+                emul_vs1 = EMUL1;
+              end
+              LMUL2: begin
+                emul_vd  = EMUL2;
+                emul_vs2 = EMUL2;
+                emul_vs1 = EMUL2;
+              end
+              LMUL4: begin
+                emul_vd  = EMUL4;
+                emul_vs2 = EMUL4;
+                emul_vs1 = EMUL4;
+              end
+              LMUL8: begin
+                emul_vd  = EMUL8;
+                emul_vs2 = EMUL8;
+                emul_vs1 = EMUL8;
+              end
+            endcase
+          end
+          //luoyang
         endcase
       end
 
@@ -1285,6 +1325,69 @@ module rvv_backend_decode_unit_ari
           end
         endcase
       end
+
+      //luoyang
+      OPMXU: begin
+          case(inst_funct6)
+              MXU_MLOAD_W, MXU_MLOAD_A, MXU_MSTORE: begin
+                  // 访存类：按LMUL决定搬运宽度
+                  case(csr_lmul)
+                      LMUL1_4, LMUL1_2, LMUL1: begin
+                          emul_vd  = EMUL1;
+                          emul_vs2 = EMUL1;
+                          emul_vs1 = EMUL1;
+                      end
+                      LMUL2: begin
+                          emul_vd  = EMUL2;
+                          emul_vs2 = EMUL2;
+                          emul_vs1 = EMUL2;
+                      end
+                      LMUL4: begin
+                          emul_vd  = EMUL4;
+                          emul_vs2 = EMUL4;
+                          emul_vs1 = EMUL4;
+                      end
+                      LMUL8: begin
+                          emul_vd  = EMUL8;
+                          emul_vs2 = EMUL8;
+                          emul_vs1 = EMUL8;
+                      end
+                  endcase
+              end
+              MXU_MMA: begin
+                  // 乘加：vd 累加器宽度可能 2x，vs1/vs2 1x
+                  case(csr_lmul)
+                      LMUL1_4, LMUL1_2, LMUL1: begin
+                          emul_vd  = EMUL1;
+                          emul_vs2 = EMUL1;
+                          emul_vs1 = EMUL1;
+                      end
+                      LMUL2: begin
+                          emul_vd  = EMUL2;
+                          emul_vs2 = EMUL1;
+                          emul_vs1 = EMUL1;
+                      end
+                      LMUL4: begin
+                          emul_vd  = EMUL4;
+                          emul_vs2 = EMUL2;
+                          emul_vs1 = EMUL2;
+                      end
+                      LMUL8: begin
+                          emul_vd  = EMUL8;
+                          emul_vs2 = EMUL4;
+                          emul_vs1 = EMUL4;
+                      end
+                  endcase
+              end
+              default: begin
+                  // MCFG, MZERO, MFENCE 不需要向量寄存器组
+                  emul_vd  = EMUL1;
+                  emul_vs2 = EMUL_NONE;
+                  emul_vs1 = EMUL_NONE;
+              end
+          endcase
+      end
+      //luoyang
     endcase
   end
  
@@ -1806,6 +1909,14 @@ module rvv_backend_decode_unit_ari
               end
             endcase
           end
+          //luoyang
+          MXU_MSTORE: begin
+            eew_vd  = EEW8;
+            eew_vs2 = EEW8;
+            eew_vs1 = EEW8;
+            eew_max = EEW8;
+          end
+          //luoyang
         endcase
       end
 
@@ -2228,6 +2339,14 @@ module rvv_backend_decode_unit_ari
           end
         endcase
       end
+      //luoyang 
+      OPMXU: begin
+        eew_vd  = EEW8;
+        eew_vs2 = EEW8;
+        eew_vs1 = EEW8;
+        eew_max = EEW8;
+      end
+      //luoyang
     endcase
   end
 
@@ -2625,6 +2744,11 @@ module rvv_backend_decode_unit_ari
             // destination register group cannot overlap the source register group
             check_special = check_vd_overlap_v0&check_vd_overlap_vs2;
           end
+          //luoyang
+          MXU_MSTORE: begin
+            check_special = 1'b1;
+          end
+          //luoyang
         endcase
       end
 
@@ -2802,12 +2926,19 @@ module rvv_backend_decode_unit_ari
           end
         endcase
       end
+      //luoyang 
+      OPMXU: begin
+        check_special = 1'b1;
+      end
+      //luoyang
     endcase
   end
 
   //check common requirements for all instructions
-  assign check_common = check_vd_align&check_vs2_align&check_vs1_align&check_sew&check_lmul&check_evl_not_0&check_vstart_sle_evl;
-
+  //luoyang
+  // assign check_common = check_vd_align&check_vs2_align&check_vs1_align&check_sew&check_lmul&check_evl_not_0&check_vstart_sle_evl;
+  assign check_common = valid_mxu ? 1'b1 : (check_vd_align&check_vs2_align&check_vs1_align&check_sew&check_lmul&check_evl_not_0&check_vstart_sle_evl);
+  //
   // check whether vd is aligned to emul_vd
   always_comb begin
     check_vd_align = 'b0; 
@@ -3010,11 +3141,16 @@ module rvv_backend_decode_unit_ari
 `endif
 
   // update uop funct3
+  //luoyang
   always_comb begin
     for(int i=0;i<`NUM_DE_UOP;i++) begin: GET_UOP_FUNCT3
-      uop_funct3[i] = inst_funct3;
+      if (valid_mxu && inst_funct3 == OPIVI)
+        uop_funct3[i] = OPMXU;
+      else
+        uop_funct3[i] = inst_funct3;
     end
   end
+  //luoyang
 
   // update uop funct6
   always_comb begin
@@ -3179,6 +3315,12 @@ module rvv_backend_decode_unit_ari
             end
           endcase
         end
+        //luoyang
+        valid_mxu: begin
+            // 所有 MXU 指令统一路由到 MXU 执行单元
+            uop_exe_unit[i] = MXU;
+        end
+        //luoyang
       endcase
     end
   end
@@ -3562,9 +3704,29 @@ module rvv_backend_decode_unit_ari
                 end
               endcase
             end
-
           endcase
         end
+        //luoyang
+        valid_mxu: begin
+          case(funct6_ari.ari_funct6)
+              MXU_MCFG: begin
+                  uop_class[i] = XXX;  // 只用 rs1 标量
+              end
+              MXU_MLOAD_W: begin
+                  uop_class[i] = XXV;  // 只读 vs2
+              end
+              MXU_MLOAD_A: begin
+                  uop_class[i] = XXV;  // 只读 vs2，rs1 携带 row
+              end
+              MXU_MSTORE: begin
+                  uop_class[i] = XXX;  // 结果从 MXU 内部读
+              end
+              default: begin
+                  uop_class[i] = XXX;  // MZERO, MMA, MFENCE
+              end
+          endcase
+        end
+        //luoyang
       endcase
     end
   end
@@ -3687,6 +3849,12 @@ module rvv_backend_decode_unit_ari
                 ignore_vma[i] = 1'b1;
               end
             end
+            //luoyang
+            MXU_MSTORE: begin
+              ignore_vma[i] = 1'b1;
+              ignore_vta[i] = 1'b1;
+            end
+            //luoyang
           endcase
         end
 
@@ -3715,6 +3883,17 @@ module rvv_backend_decode_unit_ari
             end
           endcase
         end
+        //luoyang
+        OPMXU: begin
+          case(funct6_ari.ari_funct6)
+              MXU_MCFG, MXU_MLOAD_W, MXU_MLOAD_A, MXU_MZERO,
+              MXU_MMA, MXU_MSTORE, MXU_MFENCE: begin
+                  ignore_vma[i] = 1'b1;
+                  ignore_vta[i] = 1'b1;
+              end
+          endcase
+        end
+        //luoyang
       endcase
     end
   end
@@ -4080,6 +4259,22 @@ module rvv_backend_decode_unit_ari
             end
           endcase
         end
+        //luoyang
+        valid_mxu: begin
+          case(funct6_ari.ari_funct6)
+              MXU_MSTORE: begin
+                  // MSTORE 结果写入 vd（软件通过 vd 读取累加器输出）
+                  vd_offset[i] = uop_index_current[i][`UOP_INDEX_WIDTH_ALU-1:0];
+                  vd_valid[i]  = 1'b1;
+              end
+              default: begin
+                  // MCFG, MLOAD_W, MLOAD_A, MZERO, MMA, MFENCE 不写 vd
+                  vd_offset[i] = 'b0;
+                  vd_valid[i]  = 1'b0;
+              end
+          endcase
+        end
+        //luoyang
       endcase
     end
   end
@@ -4377,6 +4572,24 @@ module rvv_backend_decode_unit_ari
             end
           endcase
         end
+        //luoyang
+        OPMXU: begin
+          case(funct6_ari.ari_funct6)
+              MXU_MCFG: begin
+                  vs1_offset[i]      = 'b0;
+                  vs1_index_valid[i]  = 1'b0;
+              end
+              MXU_MLOAD_A: begin
+                  vs1_offset[i]      = 'b0;
+                  vs1_index_valid[i]  = 1'b0;
+              end
+              default: begin
+                  vs1_offset[i]      = 'b0;
+                  vs1_index_valid[i]  = 1'b0;
+              end
+          endcase
+        end
+        //luoyang
       endcase
     end
   end
@@ -4708,6 +4921,20 @@ module rvv_backend_decode_unit_ari
             end
           endcase
         end
+        //luoyang
+        valid_mxu: begin
+            case(funct6_ari.ari_funct6)
+                MXU_MLOAD_W, MXU_MLOAD_A: begin
+                    vs2_offset[i] = uop_index_current[i][`UOP_INDEX_WIDTH_ALU-1:0];
+                    vs2_valid[i]  = 1'b1;
+                end
+                default: begin
+                    vs2_offset[i] = 'b0;
+                    vs2_valid[i]  = 1'b0;
+                end
+            endcase
+        end
+        //luoyang
       endcase
     end
   end
@@ -4877,6 +5104,25 @@ module rvv_backend_decode_unit_ari
             end
           endcase
         end
+        //luoyang
+        OPMXU: begin
+          case(funct6_ari.ari_funct6)
+              MXU_MCFG: begin
+                  rs1_data[i]       = rs1;
+                  rs1_data_valid[i] = 1'b1;
+              end
+              MXU_MLOAD_A: begin
+                  // row index 通过 rs1 传递
+                  rs1_data[i]       = rs1;
+                  rs1_data_valid[i] = 1'b1;
+              end
+              default: begin
+                  rs1_data[i]       = 'b0;
+                  rs1_data_valid[i] = 1'b0;
+              end
+          endcase
+        end
+        //luoyang
       endcase
     end
   end

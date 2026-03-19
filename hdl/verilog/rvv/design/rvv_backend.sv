@@ -190,6 +190,26 @@ module rvv_backend
   end
 `else
 // ---internal signals definition-------------------------------------
+  //luoayng
+  // Dispatch to MXU_RS
+    logic                                 mxu_rs_full;
+    logic        [`NUM_DP_UOP-1:0]        mxu_rs_almost_full;
+    logic        [`NUM_DP_UOP-1:0]        rs_valid_dp2mxu;
+    MXU_RS_t     [`NUM_DP_UOP-1:0]        rs_dp2mxu;
+    logic        [`NUM_DP_UOP-1:0]        rs_ready_mxu2dp;
+
+  // MXU_RS to MXU
+    logic        [`NUM_MXU-1:0]           pop_mxu2rs;
+    MXU_RS_t     [`NUM_MXU-1:0]           uop_rs2mxu;
+    logic                                 fifo_empty_rs2mxu;
+    logic        [`NUM_MXU-1:0]           fifo_almost_empty_rs2mxu;
+
+  // MXU to ROB
+    logic        [`NUM_MXU-1:0]           wr_valid_mxu2rob;
+    PU2ROB_t     [`NUM_MXU-1:0]           wr_mxu2rob;
+    logic        [`NUM_MXU-1:0]           wr_ready_rob2mxu;
+  //luoayng
+
   // RVV frontend to command queue
     logic                                 cq_full;
     logic        [`ISSUE_LANE-1:0]        cq_almost_full;
@@ -348,6 +368,38 @@ module rvv_backend
     genvar i;
 
 // ---code start------------------------------------------------------
+  //luoyang
+      // MXU RS
+    multi_fifo #(
+        .T              (MXU_RS_t),
+        .M              (`NUM_DP_UOP),
+        .N              (`NUM_MXU),
+        .DEPTH          (`MXU_RS_DEPTH),
+        .ASYNC_RSTN     (1'b1),
+        .CHAOS_PUSH     (1'b1)
+    ) u_mxu_rs (
+        .clk            (clk),
+        .rst_n          (rst_n),
+        .push           (rs_valid_dp2mxu),
+        .datain         (rs_dp2mxu),
+        .pop            (pop_mxu2rs),
+        .dataout        (uop_rs2mxu),
+        .full           (mxu_rs_full),
+        .almost_full    (mxu_rs_almost_full),
+        .empty          (fifo_empty_rs2mxu),
+        .almost_empty   (fifo_almost_empty_rs2mxu),
+        .clear          (trap_flush_rvv),
+        .fifo_data      (), .wptr(), .rptr(), .entry_count()
+    );
+
+    // 生成 ready 信号反压 Dispatch
+    assign rs_ready_mxu2dp[0] = ~mxu_rs_full;
+    generate
+      for (i=1;i<`NUM_DP_UOP;i++) begin: mxu_rs_ready
+        assign rs_ready_mxu2dp[i] = !mxu_rs_almost_full[i];
+      end
+    endgenerate
+  //luoyang
   // Command queue
     multi_fifo #(
         .T            (RVVCmd),
@@ -497,6 +549,13 @@ module rvv_backend
         .rs_valid_dp2div    (rs_valid_dp2div),
         .rs_dp2div          (rs_dp2div),
         .rs_ready_div2dp    (rs_ready_div2dp),
+
+        //luoyang
+        .rs_valid_dp2mxu    (rs_valid_dp2mxu),
+        .rs_dp2mxu          (rs_dp2mxu),
+        .rs_ready_mxu2dp    (rs_ready_mxu2dp),
+        //luoyang
+
         // LSU_RS
         .rs_valid_dp2lsu      (rs_valid_dp2lsu),
         .rs_dp2lsu            (rs_dp2lsu),
@@ -959,6 +1018,13 @@ module rvv_backend
         .wr_valid_div2rob       (wr_valid_div2rob),
         .wr_div2rob             (wr_div2rob),
         .wr_ready_rob2div       (wr_ready_rob2div),
+
+      //luoyang 
+        .wr_valid_mxu2rob       (wr_valid_mxu2rob),
+        .wr_mxu2rob             (wr_mxu2rob),
+        .wr_ready_rob2mxu       (wr_ready_rob2mxu),
+      //luoyang
+
       // LSU to ROB
         .wr_valid_lsu2rob       (wr_valid_lsu2rob),
         .wr_lsu2rob             (wr_lsu2rob),
@@ -1026,6 +1092,25 @@ module rvv_backend
         .rt2vrf_wr_data   (wr_data_rt2vrf)
     );
 
+  //luoyang
+    // MXU Execution Unit
+    rvv_backend_mxu_wrapper u_mxu_wrapper (
+        .clk                        (clk),
+        .rst_n                      (rst_n),
+      // MXU_RS to MXU
+        .pop_ex2rs                  (pop_mxu2rs),
+        .mxu_uop_rs2ex              (uop_rs2mxu),
+        .fifo_empty_rs2ex           (fifo_empty_rs2mxu),
+        .fifo_almost_empty_rs2ex    (fifo_almost_empty_rs2mxu),
+      // MXU to ROB
+        .result_valid_ex2rob        (wr_valid_mxu2rob),
+        .result_ex2rob              (wr_mxu2rob),
+        .result_ready_rob2ex        (wr_ready_rob2mxu),
+      // trap-flush
+        .trap_flush_rvv             (trap_flush_rvv)
+    );
+  //luoyang
+  
   // rvv_backend IDLE 
   assign rvv_idle = fifo_empty_cq2de&uq_empty&rob_empty;
   

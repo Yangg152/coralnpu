@@ -21,6 +21,10 @@ module rvv_backend_dispatch_ctrl
     rs_ready_mul2dp,
     rs_valid_dp2div,
     rs_ready_div2dp,
+    //luoyang
+    rs_valid_dp2mxu,     
+    rs_ready_mxu2dp,     
+    //luoyang
     rs_valid_dp2lsu,
     rs_ready_lsu2dp,
     mapinfo_valid_dp2lsu,
@@ -47,6 +51,10 @@ module rvv_backend_dispatch_ctrl
     input   logic         [`NUM_DP_UOP-1:0] rs_ready_mul2dp;
     output  logic         [`NUM_DP_UOP-1:0] rs_valid_dp2div;
     input   logic         [`NUM_DP_UOP-1:0] rs_ready_div2dp;
+    //luoyang
+    output  logic         [`NUM_DP_UOP-1:0] rs_valid_dp2mxu;
+    input   logic         [`NUM_DP_UOP-1:0] rs_ready_mxu2dp; 
+    //luoyang
     output  logic         [`NUM_DP_UOP-1:0] rs_valid_dp2lsu;
     input   logic         [`NUM_DP_UOP-1:0] rs_ready_lsu2dp;
     output  logic         [`NUM_DP_UOP-1:0] mapinfo_valid_dp2lsu;
@@ -108,6 +116,9 @@ module rvv_backend_dispatch_ctrl
                     PMT,
                     RDT: rs_ready[0] = rs_ready_pmtrdt2dp[0];
                     DIV: rs_ready[0] = rs_ready_div2dp[0];
+                    //luoyang
+                    MXU: rs_ready[0] = rs_ready_mxu2dp[0];
+                    //luoyang
                     LSU: rs_ready[0] = rs_ready_lsu2dp[0] & mapinfo_ready_lsu2dp[0];
                     default: rs_ready[0] = 1'b0;
                 endcase
@@ -122,6 +133,9 @@ module rvv_backend_dispatch_ctrl
                     PMT,
                     RDT: rs_ready[i] = rs_ready[i-1] & rs_ready_pmtrdt2dp[i];
                     DIV: rs_ready[i] = rs_ready[i-1] & rs_ready_div2dp[i];
+                    //luoyang
+                    MXU: rs_ready[i] = rs_ready[i-1] & rs_ready_mxu2dp[i];
+                    //luoyang
                     LSU: rs_ready[i] = rs_ready[i-1] & rs_ready_lsu2dp[i] & mapinfo_ready_lsu2dp[i];
                     default: rs_ready[i] = 1'b0;
                 endcase
@@ -150,6 +164,10 @@ module rvv_backend_dispatch_ctrl
                                               uop_ctrl[i].uop_exe_unit == MAC );
             assign rs_valid_dp2div[i]      = uop_ready_dp2uop[i] & 
                                              (uop_ctrl[i].uop_exe_unit == DIV);
+            //luoyang
+            assign rs_valid_dp2mxu[i]      = uop_ready_dp2uop[i] & 
+                                             (uop_ctrl[i].uop_exe_unit == MXU);            
+            //luoyang
             assign rs_valid_dp2lsu[i]      = uop_ready_dp2uop[i] & 
                                              (uop_ctrl[i].uop_exe_unit == LSU);
             assign mapinfo_valid_dp2lsu[i] = uop_valid_dp2rob[i] & 

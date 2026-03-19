@@ -58,6 +58,22 @@ class RvvCompressedInstruction extends Bundle {
     bits(7, 5)
   }
 
+  // luoyang: check if this is an MXU instruction (funct3 = OPMXU = 001)
+  def isMxu(): Bool = {
+    (opcode === RvvCompressedOpcode.RVVALU) && (funct3() === "b001".U)
+  }
+
+  // luoyang: check if this is an MSTORE encoded via OPIVI (funct3=011, funct6=111111)
+  def isMxuMstoreViaOpivi(): Bool = {
+    (opcode === RvvCompressedOpcode.RVVALU) && (funct3() === "b011".U) && (funct6() === "b111111".U)
+  }
+
+  // luoyang: helper — MXU instructions that do NOT write vector registers
+  // (everything except MSTORE which has funct6=111111)
+  private def isMxuNonStore(): Bool = {
+    isMxu() && (funct6() =/= "b111111".U)
+  }
+
   // These instructions need to trap when vstart is not zero. This includes
   // all reduction instructions.
   def requireZeroVstart(): Bool = {
@@ -102,8 +118,10 @@ class RvvCompressedInstruction extends Bundle {
     opcode.isOneOf(RvvCompressedOpcode.RVVLOAD, RvvCompressedOpcode.RVVSTORE)
   }
 
+  // luoyang: MXU MCFG and MLOAD_A need rs1 from scalar register file
   def readsRs1(): Bool = {
     isLoadStore() ||
+    (funct3() === "b001".U) ||  // luoyang: OPMXU — MCFG needs config val, MLOAD_A needs row index
     (funct3() === "b100".U) ||  // OPIVX
     (funct3() === "b110".U) ||  // OPMVX
     ((funct3() === "b111".U) && (bits(24, 23) =/= "b11".U))  // vsetvl and vsetvli
@@ -120,12 +138,11 @@ class RvvCompressedInstruction extends Bundle {
     (opcode === RvvCompressedOpcode.RVVALU && funct3() === "b010".U && funct6() === "b010000".U)
   }
 
+  // luoyang: MSTORE writes to a vector register (vd), and MXU instructions
+  // via OPMXU that are NOT MSTORE do not write vector registers.
   def writesVectorRegister(): Bool = {
-    // A vector instruction writes to a vector register if it's an ALU operation
-    // or a load operation. Store operations do not write to a vector register.
-    // vset* instructions write to a scalar register (rd), not a vector register.
-    // Scalar-write instructions (vmv.x.s, vcpop, vfirst) also do not write vector registers.
-    opcode === RvvCompressedOpcode.RVVLOAD || (opcode === RvvCompressedOpcode.RVVALU && !writesRd())
+    opcode === RvvCompressedOpcode.RVVLOAD ||
+    (opcode === RvvCompressedOpcode.RVVALU && !writesRd() && !isMxuNonStore())
   }
 
   override def toPrintable: Printable = {
@@ -349,6 +366,31 @@ class RvvS1DecodeInstructionBase {
     ))
   }
 
+  // luoyang: MXU instructions use funct3 = OPMXU (3'b001)
+  // All MXU instructions are decoded by rvv_backend internally.
+  // The scalar core only needs to recognize them as valid and pass them through.
+  // We reuse VADD as a placeholder op — the actual funct6 dispatch happens in
+  // rvv_backend_decode_unit_ari.sv via funct3=OPMXU + funct6.
+  private def s1decode_opmxu(f6vm: UInt, vs2: UInt, vs1: UInt, vd: UInt): Valid[RvvS1DecodedInstruction] = {
+    val funct6 = f6vm(6, 1)
+    val is_valid_mxu = (
+      (funct6 === "b000000".U) ||  // MXU_MCFG
+      (funct6 === "b000001".U) ||  // MXU_MLOAD_W
+      (funct6 === "b000010".U) ||  // MXU_MLOAD_A
+      (funct6 === "b000011".U) ||  // MXU_MZERO
+      (funct6 === "b000100".U) ||  // MXU_MMA
+      (funct6 === "b111111".U) ||  // MXU_MSTORE
+      (funct6 === "b000110".U)     // MXU_MFENCE
+    )
+
+    // Use VADD as placeholder — rvv_backend will re-decode using funct3+funct6
+    ForceZero(MakeWireBundle[ValidIO[RvvS1DecodedInstruction]](
+      Valid(new RvvS1DecodedInstruction),
+      _.valid -> is_valid_mxu,
+      _.bits.op -> RvvAluOp.VADD,
+    ))
+  }
+
   protected def s1decode_opv(bits: UInt): Valid[RvvS1DecodedInstruction] = {
     // 7 LSB have already been consumed, 25 bits left.
     val vd = bits(4, 0)  // Or rd where applicable.
@@ -360,6 +402,9 @@ class RvvS1DecodeInstructionBase {
 
     MuxLookup(mode, invalid())(Seq(
       "b000".U -> s1decode_opivv(f6vm, vs2, vs1, vd),
+      //luoyang
+      "b001".U -> s1decode_opmxu(f6vm, vs2, vs1, vd),
+      //luoyang
       "b011".U -> s1decode_opivi(f6vm, vs2, vs1, vd),
       "b100".U -> s1decode_opivx(f6vm, vs2, vs1, vd),
     ))
@@ -380,7 +425,6 @@ object RvvS1DecodeInstruction extends RvvS1DecodeInstructionBase {
     ))
   }
 }
-
 
 object RvvS1DecodeCompressedInstruction extends RvvS1DecodeInstructionBase {
   // RVV is an extension and does not directly handle undefined (illegal)

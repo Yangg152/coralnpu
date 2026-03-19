@@ -1,7 +1,3 @@
-`ifndef HDL_VERILOG_RVV_DESIGN_RVV_SVH
-`include "rvv_backend.svh"
-`endif
-
 module rvv_backend_mxu_pe (
     input  wire        clk,
     input  wire        rst_n,
@@ -12,12 +8,16 @@ module rvv_backend_mxu_pe (
     output wire signed [31:0] acc_out
 );
 
-    // Stage 1: 乘法（INT8×INT8 → INT16），寄存
+    // Stage 1: multiply
     reg signed [15:0] mul_reg;
     reg               en_d1;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
+            mul_reg <= 16'sd0;
+            en_d1   <= 1'b0;
+        end else if (acc_clear) begin
+            // Kill any in-flight multiply when clearing
             mul_reg <= 16'sd0;
             en_d1   <= 1'b0;
         end else begin
@@ -29,7 +29,7 @@ module rvv_backend_mxu_pe (
         end
     end
 
-    // Stage 2: 累加（INT16符号扩展 → INT32）
+    // Stage 2: accumulate
     reg signed [31:0] acc_reg;
 
     always @(posedge clk or negedge rst_n) begin
@@ -38,7 +38,7 @@ module rvv_backend_mxu_pe (
         end else if (acc_clear) begin
             acc_reg <= 32'sd0;
         end else if (en_d1) begin
-            acc_reg <= acc_reg + $signed({{16{mul_reg[15]}}, mul_reg});
+            acc_reg <= acc_reg + {{16{mul_reg[15]}}, mul_reg};
         end
     end
 
