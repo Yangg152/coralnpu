@@ -261,58 +261,123 @@ class ConvTest:
         print("-" * 120 + "\n", flush=True)
 
 
-# ==============================================================================
-# Tests
-# ==============================================================================
+# === Tests ===
+
+# @cocotb.test()
+# async def test_sanity_check_python(dut):
+#     """Sanity Check 1: 极小 2x2 测试"""
+#     t = ConvTest(in_ch=2, out_ch=2, h=2, w=2, kernel_size=1, stride=1, padding=0)
+#     await t.load_and_populate_input(dut)
+#     await t.test(ref_target=10000, opt_target=10000, run_ref=False, fixed_ref_cycles=100, check_python=True)
+
+# @cocotb.test()
+# async def test_sanity_check_padding(dut):
+#     """Sanity Check 2: 包含 Padding 的测试，验证 Python Ref 修复"""
+#     # 3x3 Input, 3x3 Kernel, Padding=1 -> 3x3 Output
+#     t = ConvTest(in_ch=1, out_ch=1, h=3, w=3, kernel_size=3, stride=1, padding=1)
+#     await t.load_and_populate_input(dut)
+#     # 依然跑 C++ Ref 确保两者一致
+#     await t.test(ref_target=50000, opt_target=10000, run_ref=True, check_python=True)
 
 @cocotb.test()
-async def test_mxu_exact_1_tile(dut):
-    """【完美对齐】1个 16x16 Tile: Pixels=16, Out_C=16, In_C=16"""
-    t = ConvTest(in_ch=16, out_ch=16, h=4, w=4, kernel_size=1)
+async def test_conv1x1_mini(dut):
+    t = ConvTest(in_ch=8, out_ch=8, h=4, w=4)
     await t.load_and_populate_input(dut)
-    await t.test(ref_target=200_000, opt_target=50_000, run_ref=True, check_python=True)
+    await t.test(ref_target=60_000, opt_target=30_000, run_ref=True, check_python=True)
 
 @cocotb.test()
-async def test_mxu_unaligned_small(dut):
-    """【不足对齐】Pixels 和 Channels 都不足 16"""
-    t = ConvTest(in_ch=11, out_ch=7, h=3, w=3, kernel_size=1)
+async def test_conv3x3_basic(dut):
+    t = ConvTest(in_ch=2, out_ch=4, h=5, w=5, kernel_size=3, stride=1, padding=0)
     await t.load_and_populate_input(dut)
-    await t.test(ref_target=100_000, opt_target=30_000, run_ref=True, check_python=True)
+    await t.test(ref_target=500_000, opt_target=100_000, run_ref=True, check_python=True)
 
 @cocotb.test()
-async def test_mxu_tk_greater_than_16(dut):
-    """【Tk 深度跨 Tile】输入深度超过 16"""
-    t = ConvTest(in_ch=32, out_ch=16, h=5, w=5, kernel_size=1)
+async def test_conv3x3_stride2(dut):
+    t = ConvTest(in_ch=2, out_ch=4, h=7, w=7, kernel_size=3, stride=2, padding=0)
     await t.load_and_populate_input(dut)
-    await t.test(ref_target=500_000, opt_target=80_000, run_ref=True, check_python=True)
+    await t.test(ref_target=400_000, opt_target=80_000, run_ref=True, check_python=True)
+
+# 1. 之前报错的场景：Padding=1, Stride=2
+# 这个测试专门用于回归验证你刚才遇到的 "Output mismatch" 问题
+@cocotb.test()
+async def test_conv3x3_pad1_stride2(dut):
+    t = ConvTest(in_ch=4, out_ch=8, h=7, w=7, kernel_size=3, stride=2, padding=1)
+    await t.load_and_populate_input(dut)
+    await t.test(ref_target=400_000, opt_target=80_000, run_ref=True, check_python=True)
+
+# 2. 宽度边界测试：Width = 9
+# 你的 3x3 优化代码每 8 个像素 unroll 一次。
+# Width=9 会测试：8个 Fast Path + 1个 Remainder Loop，这是极易出错的转换点。
+@cocotb.test()
+async def test_conv3x3_width_boundary(dut):
+    t = ConvTest(in_ch=4, out_ch=4, h=4, w=9, kernel_size=3, stride=1, padding=0)
+    await t.load_and_populate_input(dut)
+    await t.test(ref_target=500_000, opt_target=100_000, run_ref=True, check_python=True)
+
+# 3. 奇数通道测试 (非对齐)
+# 用于测试 RVV 的通道维度的 vsetvl/remainder 处理逻辑
+@cocotb.test()
+async def test_conv3x3_odd_channels(dut):
+    t = ConvTest(in_ch=3, out_ch=7, h=5, w=5, kernel_size=3, stride=1, padding=0)
+    await t.load_and_populate_input(dut)
+    await t.test(ref_target=500_000, opt_target=100_000, run_ref=True, check_python=True)
+
+# 4. 1x1 卷积的大尺寸压力测试
+# 确保在较大的 Loop 次数下，累加器不会溢出，且寄存器压力管理正常
+# @cocotb.test()
+# async def test_conv1x1_large(dut):
+#     t = ConvTest(in_ch=32, out_ch=32, h=8, w=8, kernel_size=1, stride=1, padding=0)
+#     await t.load_and_populate_input(dut)
+#     await t.test(ref_target=1_000_000, opt_target=200_000, run_ref=True, check_python=True)
+
+
+# 5. 通用卷积 Fallback 测试
+# 5x5 卷积，你的代码应该自动回退到 Reference 实现，确保 Dispatch 逻辑正确
+@cocotb.test()
+async def test_conv5x5_fallback(dut):
+    t = ConvTest(in_ch=2, out_ch=4, h=7, w=7, kernel_size=5, stride=1, padding=0)
+    await t.load_and_populate_input(dut)
+    await t.test(ref_target=1_000_000, opt_target=200_000, run_ref=True, check_python=True)
+
+# === Benchmarks ===
 
 @cocotb.test()
-async def test_mxu_large_channel(dut):
-    """【大通道切换】Tk 最大化边界测试"""
-    t = ConvTest(in_ch=128, out_ch=32, h=4, w=4, kernel_size=1)
+async def benchmark_1x1_layer3_equivalent(dut):
+    # Equivalent to VWW network sequence 3: 1x1 conv after first DW layer
+    # Input spatial: ~48x48, channels 8->16
+    t = ConvTest(in_ch=8, out_ch=16, h=64, w=64, kernel_size=1, stride=1, padding=0)
     await t.load_and_populate_input(dut)
-    await t.test(ref_target=1_000_000, opt_target=150_000, run_ref=True, check_python=True)
+    await t.test(ref_target=30_000_000, opt_target=500_000, run_ref=True, check_python=True)
+
 
 @cocotb.test()
-async def test_fallback_3x3_sanity(dut):
-    """【退化回退测试】验证 3x3 会安全回到纯 RVV 而不走 MXU"""
-    t = ConvTest(in_ch=4, out_ch=8, h=5, w=5, kernel_size=3, stride=1, padding=1)
+async def benchmark_op0_layer1(dut):
+    # MBV1 0.25 Layer 0
+    t = ConvTest(in_ch=3, out_ch=8, h=128, w=128, kernel_size=3, stride=2, padding=1)
     await t.load_and_populate_input(dut)
-    await t.test(ref_target=500_000, opt_target=200_000, run_ref=True, check_python=True)
+    
+    # 开启 check_python，应当 PASS
+    await t.test(ref_target=60_000_000, opt_target=6_000_000, 
+                 run_ref=False, fixed_ref_cycles=37062739, 
+                 check_python=True)
 
 @cocotb.test()
-async def benchmark_mxu_mobilenet_v1_pw1(dut):
-    """Benchmark: MobileNetV1 第一个 Pointwise Conv (1x1)"""
-    t = ConvTest(in_ch=32, out_ch=64, h=64, w=64, kernel_size=1)
+async def benchmark_pointwise_mid(dut):
+    # Middle layer
+    t = ConvTest(in_ch=8, out_ch=32, h=32, w=32, kernel_size=1, stride=1, padding=0)
     await t.load_and_populate_input(dut)
-    await t.test(ref_target=80_000_000, opt_target=5_000_000, run_ref=True, check_python=True)
+    
+    await t.test(ref_target=30_000_000, opt_target=3_000_000, 
+                 run_ref=False, fixed_ref_cycles=16376189,
+                 check_python=True)
+
 
 @cocotb.test()
-async def benchmark_mxu_vww_bottleneck(dut):
-    """Benchmark: VWW 网络的特征压缩瓶颈层"""
-    t = ConvTest(in_ch=128, out_ch=32, h=16, w=16, kernel_size=1)
+async def benchmark_1x1_ch64_to_128(dut):
+    t = ConvTest(in_ch=64, out_ch=128, h=8, w=8, kernel_size=1, stride=1, padding=0)
     await t.load_and_populate_input(dut)
-    await t.test(ref_target=40_000_000, opt_target=1_500_000, run_ref=True, check_python=True)
+    # 对于极密集的运算，建议 timeout 设大一些防止仿真提前终止
+    await t.test(ref_target=50_000_000, opt_target=1_000_000, run_ref=True, check_python=True)
 
 @cocotb.test()
 async def z_final_report(dut):

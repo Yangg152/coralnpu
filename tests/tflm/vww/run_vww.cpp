@@ -8,6 +8,7 @@
 #include "sw/opt/litert-micro/pooling.h"
 #include "sw/opt/litert-micro/fully_connected.h"
 #include "sw/opt/litert-micro/softmax.h"
+#include "sw/opt/litert-micro/mxu.h"
 
 #include "tensorflow/lite/core/c/common.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
@@ -43,9 +44,10 @@ using coralnpu_v2::opt::litert_micro::Register_DEPTHWISE_CONV_2D;
 using coralnpu_v2::opt::litert_micro::Register_FULLY_CONNECTED;
 using coralnpu_v2::opt::litert_micro::Register_AVERAGE_POOL_2D;
 using coralnpu_v2::opt::litert_micro::Register_SOFTMAX;
+using coralnpu_v2::opt::litert_micro::Register_MXU_CONV_2D;
 
 TfLiteStatus RegisterOps(VwwOpResolver& op_resolver) {
-    TF_LITE_ENSURE_STATUS(op_resolver.AddConv2D(Register_CONV_2D()));
+    TF_LITE_ENSURE_STATUS(op_resolver.AddConv2D(Register_MXU_CONV_2D()));
     TF_LITE_ENSURE_STATUS(op_resolver.AddDepthwiseConv2D(Register_DEPTHWISE_CONV_2D()));
     TF_LITE_ENSURE_STATUS(op_resolver.AddFullyConnected(Register_FULLY_CONNECTED()));
     TF_LITE_ENSURE_STATUS(op_resolver.AddAveragePool2D(Register_AVERAGE_POOL_2D()));

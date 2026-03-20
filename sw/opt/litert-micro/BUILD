@@ -167,11 +167,11 @@ cc_library(
     ],
     hdrs = [
         "mxu.h",
-        "conv.h"
     ],
     target_compatible_with = ["//platforms/cpu:coralnpu_v2"], 
     deps = [
         ":memory_util",
+        ":conv",         
         "//sw/opt:rvv_opt",
         "@tflite_micro//tensorflow/lite/micro:op_resolvers",
     ],

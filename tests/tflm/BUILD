@@ -48,6 +48,7 @@ coralnpu_v2_binary(
         "//sw/opt/litert-micro:fully_connected",
         "//sw/opt/litert-micro:pooling",
         "//sw/opt/litert-micro:softmax",
+        "//sw/opt/litert-micro:mxu",
         # "//third_party/muriscv-nn:muriscv_nn_tflm_kernels",
         "@tflite_micro//tensorflow/lite/micro:micro_framework",
         "@tflite_micro//tensorflow/lite/micro:micro_log",

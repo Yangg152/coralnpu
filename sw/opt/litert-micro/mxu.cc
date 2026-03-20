@@ -39,7 +39,6 @@ void mxu_mload_a_from_mem(const int8_t* src, bool is_last) {
         asm volatile(
             "vsetvli zero, %1, e8, m1, ta, ma\n\t"
             "vle8.v v16, (%0)\n\t"
-            "vadd.vi v16, v16, 0\n\t"
             ".word 0x09001057"
             :: "r"(src), "r"(16)
             : "memory", "v16"
@@ -48,7 +47,6 @@ void mxu_mload_a_from_mem(const int8_t* src, bool is_last) {
         asm volatile(
             "vsetvli zero, %1, e8, m1, ta, ma\n\t"
             "vle8.v v16, (%0)\n\t"
-            "vadd.vi v16, v16, 0\n\t"
             ".word 0x0B001057"
             :: "r"(src), "r"(16)
             : "memory", "v16"
@@ -62,7 +60,6 @@ void mxu_mload_w_from_mem(const int8_t* src, bool is_last) {
         asm volatile(
             "vsetvli zero, %1, e8, m1, ta, ma\n\t"
             "vle8.v v16, (%0)\n\t"
-            "vadd.vi v16, v16, 0\n\t"
             ".word 0x05001057"
             :: "r"(src), "r"(16)
             : "memory", "v16"
@@ -71,7 +68,6 @@ void mxu_mload_w_from_mem(const int8_t* src, bool is_last) {
         asm volatile(
             "vsetvli zero, %1, e8, m1, ta, ma\n\t"
             "vle8.v v16, (%0)\n\t"
-            "vadd.vi v16, v16, 0\n\t"
             ".word 0x07001057"
             :: "r"(src), "r"(16)
             : "memory", "v16"
@@ -125,21 +121,34 @@ aligned_array<T> make_aligned_array(size_t alignment, size_t nmemb) {
   return aligned_array<T>(reinterpret_cast<T*>(ptr));
 }
 
+// =========================================================
+// RVV quantization helper (LMUL=4)
+// =========================================================
+inline __attribute__((always_inline)) vint8m1_t QuantizeResult_m4(
+    vint32m4_t acc, vint32m4_t v_mult, vuint32m4_t v_lshift, vuint32m4_t v_rshift,
+    int32_t output_offset, int32_t output_min, int32_t output_max, size_t vl) {
+    constexpr uint32_t vxrm = 0;
+    acc = __riscv_vsll_vv_i32m4(acc, v_lshift, vl);
+    acc = __riscv_vsmul_vv_i32m4(acc, v_mult, vxrm, vl);
+    acc = __riscv_vssra_vv_i32m4(acc, v_rshift, vxrm, vl);
+    acc = __riscv_vadd_vx_i32m4(acc, output_offset, vl);
+    vint16m2_t acc_16 = __riscv_vnclip_wx_i16m2(acc, 0, vxrm, vl);
+    vint8m1_t acc_8 = __riscv_vnclip_wx_i8m1(acc_16, 0, vxrm, vl);
+    acc_8 = __riscv_vmax_vx_i8m1(acc_8, (int8_t)output_min, vl);
+    acc_8 = __riscv_vmin_vx_i8m1(acc_8, (int8_t)output_max, vl);
+    return acc_8;
+}
+
 // -----------------------------------------------------------------------------
-// MXU 1x1 convolution with correct quantization math
+// MXU 1x1 convolution — activation-reuse optimized
 //
-// TFLite quantized conv computes:
-//   acc[p][oc] = sum_ic( (input[p][ic] + input_offset) * filter[oc][ic] ) + bias[oc]
+// Key insight: MXU's abuf is NOT cleared by MLOAD_W, MZERO, or MMA.
+// So we load activations ONCE per pixel-tile, then iterate over all
+// oc-tiles reloading only weights each time.
 //
-// We decompose this as:
-//   acc[p][oc] = sum_ic( input[p][ic] * filter[oc][ic] )          ... (A) MXU does this
-//              + input_offset * sum_ic( filter[oc][ic] )           ... (B) precomputed
-//              + bias[oc]                                          ... (C) from bias_data
-//
-// MXU computes (A) using raw int8 values (no offset applied to activations).
-// Term (B) + (C) is a per-channel constant added after MXU readout.
-//
-// This avoids the int8 overflow problem of adding input_offset to activations.
+// Loop order:  pixel_tile (outer) → oc_tile (inner)
+//   - MLOAD_A: once per pixel_tile
+//   - MLOAD_W + MZERO + MMA + MSTORE: once per (pixel_tile, oc_tile)
 // -----------------------------------------------------------------------------
 void Conv1x1PerChannel_MXU(
     const ConvParams&   params,
@@ -161,166 +170,163 @@ void Conv1x1PerChannel_MXU(
 
     const int32_t input_offset  = params.input_offset;
     const int32_t output_offset = params.output_offset;
-    const int8_t  output_min    = (int8_t)params.quantized_activation_min;
-    const int8_t  output_max    = (int8_t)params.quantized_activation_max;
+    const int32_t output_min    = params.quantized_activation_min;
+    const int32_t output_max    = params.quantized_activation_max;
 
     const int Tk = input_depth;
     const int num_chunks = Tk / 16;
+    const int num_oc_tiles = (output_depth + 15) / 16;
 
-    // Prepare shift params for PostprocessAcc
+    // ---- Prepare per-channel quantization shift params ----
     auto lshift_data = make_aligned_array<uint8_t>(16, output_depth);
     auto rshift_data = make_aligned_array<uint8_t>(16, output_depth);
     if (!lshift_data || !rshift_data) return;
     PrepareShiftParams(lshift_data.get(), rshift_data.get(),
                        output_shift, output_depth);
 
-    // Precompute per-channel bias correction:
-    //   combined_bias[oc] = bias[oc] + input_offset * sum_ic(filter[oc][ic])
+    // ---- Precompute combined_bias[oc] = bias[oc] + input_offset * Σ filter[oc][ic] ----
     auto combined_bias = make_aligned_array<int32_t>(16, output_depth);
     if (!combined_bias) return;
     for (int oc = 0; oc < output_depth; oc++) {
-        int32_t filter_sum = 0;
-        const int8_t* f_ptr = filter_data + oc * input_depth;
+        int32_t fsum = 0;
+        const int8_t* fp = filter_data + oc * input_depth;
         for (int ic = 0; ic < input_depth; ic++) {
-            filter_sum += f_ptr[ic];
+            fsum += fp[ic];
         }
-        int32_t bias_val = bias_data ? bias_data[oc] : 0;
-        combined_bias[oc] = bias_val + input_offset * filter_sum;
+        combined_bias[oc] = (bias_data ? bias_data[oc] : 0)
+                          + input_offset * fsum;
     }
 
-    // Weight tile buffer: Tk rows × 16 cols
-    auto wt_tile = make_aligned_array<int8_t>(16, Tk * 16);
-    if (!wt_tile) return;
+    // ---- Pre-pack ALL weight tiles contiguously ----
+    // Layout: wt_all[ oc_tile_idx * Tk * 16 + k * 16 + j ]
+    //   k = input channel index (0..Tk-1)
+    //   j = oc index within tile (0..15)
+    auto wt_all = make_aligned_array<int8_t>(16, num_oc_tiles * Tk * 16);
+    if (!wt_all) return;
+    for (int ot = 0; ot < num_oc_tiles; ot++) {
+        const int oc_base = ot * 16;
+        const int oc_tile = std::min(16, output_depth - oc_base);
+        for (int k = 0; k < Tk; k++) {
+            int8_t* dst = wt_all.get() + (ot * Tk + k) * 16;
+            for (int j = 0; j < 16; j++) {
+                dst[j] = (j < oc_tile)
+                    ? filter_data[(oc_base + j) * input_depth + k]
+                    : 0;
+            }
+        }
+    }
 
-    // Accumulator readout buffer: 16 rows × 16 cols int32
+    // MXU accumulator readout buffer: 16 rows × 16 cols int32
     int32_t acc_buf[16 * 16] __attribute__((aligned(16)));
+    int8_t zeros[16] __attribute__((aligned(16))) = {0};
 
-    // Temporary output buffer for PostprocessAcc when output_depth > 16
-    // PostprocessAcc writes with stride = out_d, but we need stride = output_depth
-    auto tmp_out = make_aligned_array<int8_t>(16, 16 * 16);
-    if (!tmp_out) return;
-
-    // Configure MXU
+    // ---- Configure MXU ----
     {
         uint32_t cfg = (uint32_t)(Tk & 0xFF) | 0x100;
         mxu_mcfg(cfg);
     }
 
-    // Tile over output channels in groups of 16
-    for (int oc_base = 0; oc_base < output_depth; oc_base += 16) {
-        const int oc_tile = std::min(16, output_depth - oc_base);
+    // ================================================================
+    // OUTER LOOP: pixel tiles
+    //   Load activation into MXU A-buffer ONCE per pixel tile.
+    //   abuf survives across MLOAD_W / MZERO / MMA / MSTORE.
+    // ================================================================
+    for (int p_base = 0; p_base < num_pixels; p_base += 16) {
+        const int p_tile = std::min(16, num_pixels - p_base);
 
-        // ---- Pack weight tile ----
-        // MXU weight row k = { filter[oc_base+j][k] } for j=0..15
-        for (int k = 0; k < Tk; k++) {
-            int8_t* dst_row = wt_tile.get() + k * 16;
-            for (int j = 0; j < 16; j++) {
-                if (j < oc_tile) {
-                    dst_row[j] = filter_data[(oc_base + j) * input_depth + k];
-                } else {
-                    dst_row[j] = 0;
+        // ---- Load activations into MXU A-buffer (once) ----
+        {
+            const int total_beats = 16 * num_chunks;
+            int beat = 0;
+            for (int row = 0; row < 16; row++) {
+                for (int chunk = 0; chunk < num_chunks; chunk++) {
+                    const int8_t* src;
+                    if (row < p_tile) {
+                        src = input_data
+                            + (p_base + row) * input_depth
+                            + chunk * 16;
+                    } else {
+                        src = zeros;
+                    }
+                    mxu_mload_a_from_mem(src, (beat == total_beats - 1));
+                    beat++;
                 }
             }
-        }
-
-        // ---- Load weights into MXU ----
-        for (int k = 0; k < Tk; k++) {
-            mxu_mload_w_from_mem(wt_tile.get() + k * 16, (k == Tk - 1));
         }
         mxu_mfence();
 
-        // Tile over pixels in groups of 16
-        for (int p_base = 0; p_base < num_pixels; p_base += 16) {
-            const int p_tile = std::min(16, num_pixels - p_base);
+        // ============================================================
+        // INNER LOOP: oc tiles
+        //   Reload weights only; A-buffer is reused.
+        // ============================================================
+        for (int ot = 0; ot < num_oc_tiles; ot++) {
+            const int oc_base = ot * 16;
+            const int oc_tile = std::min(16, output_depth - oc_base);
 
-            // ---- Zero accumulators ----
-            mxu_mzero();
-
-            // ---- Load activations (raw, no offset) ----
-            // Beat order: row0-chunk0, row1-chunk0, ..., row15-chunk0,
-            //             row0-chunk1, ..., row15-chunk(num_chunks-1)
-            {
-                int total_beats = 16 * num_chunks;
-                int beat = 0;
-                for (int chunk = 0; chunk < num_chunks; chunk++) {
-                    for (int row = 0; row < 16; row++) {
-                        if (row < p_tile) {
-                            const int8_t* src =
-                                input_data + (p_base + row) * input_depth
-                                + chunk * 16;
-                            mxu_mload_a_from_mem(src, (beat == total_beats - 1));
-                        } else {
-                            // Zero-pad for unused rows
-                            int8_t zeros[16] __attribute__((aligned(16))) = {0};
-                            mxu_mload_a_from_mem(zeros, (beat == total_beats - 1));
-                        }
-                        beat++;
-                    }
-                }
+            // ---- Load weights for this oc tile ----
+            const int8_t* wt_base = wt_all.get() + ot * Tk * 16;
+            for (int k = 0; k < Tk; k++) {
+                mxu_mload_w_from_mem(wt_base + k * 16, (k == Tk - 1));
             }
+            mxu_mfence();
 
-            // ---- Compute ----
+            // ---- Zero accumulators → MMA → fence ----
+            mxu_mzero();
             mxu_mma();
             mxu_mfence();
 
-            // ---- Read out accumulators ----
-            // 64 MSTORE calls, each returns 4 int32
-            // Layout: call i → acc_buf[i*4 .. i*4+3]
-            // Row r, col group g (g=0..3): call index = r*4 + g
-            // acc_buf[r*16 + g*4 + 0..3]
+            // ---- Read out 16×16 accumulator (64 MSTORE calls) ----
             for (int i = 0; i < 64; i++) {
                 mxu_mstore_to_mem(&acc_buf[i * 4]);
             }
             mxu_mfence();
 
-            // ---- Postprocess ----
-            // acc_buf[row * 16 + col] contains raw MXU result (term A)
-            // We need to add combined_bias (terms B + C) before requantize
-            //
-            // PostprocessAcc expects accs WITHOUT bias (it adds bias internally),
-            // so we pass combined_bias as the bias pointer.
-            //
-            // When output_depth == 16, we can write directly.
-            // Otherwise, write to tmp_out then scatter.
-            if (output_depth == 16) {
-                // Direct write: PostprocessAcc stride matches output stride
-                PostprocessAcc(
-                    acc_buf,
-                    combined_bias.get() + oc_base,
-                    lshift_data.get() + oc_base,
-                    output_multiplier + oc_base,
-                    rshift_data.get() + oc_base,
-                    output_offset,
-                    output_min,
-                    output_max,
-                    output_data + p_base * output_depth + oc_base,
-                    p_tile,
-                    oc_tile);
-            } else {
-                // Write to temp buffer, then scatter to output
-                PostprocessAcc(
-                    acc_buf,
-                    combined_bias.get() + oc_base,
-                    lshift_data.get() + oc_base,
-                    output_multiplier + oc_base,
-                    rshift_data.get() + oc_base,
-                    output_offset,
-                    output_min,
-                    output_max,
-                    tmp_out.get(),
-                    p_tile,
-                    oc_tile);
+            // ---- RVV per-channel quantization ----
+            int oc_off = 0;
+            size_t oc_rem = oc_tile;
+            while (oc_rem > 0) {
+                const size_t vl = __riscv_vsetvl_e32m4(oc_rem);
 
-                // Scatter: tmp_out[p * oc_tile + j] → output[p_base+p][oc_base+j]
+                // Load combined bias for this oc slice
+                vint32m4_t bias_vec = __riscv_vle32_v_i32m4(
+                    combined_bias.get() + oc_base + oc_off, vl);
+
+                // Load quantization params
+                vint32m4_t v_mult = __riscv_vle32_v_i32m4(
+                    output_multiplier + oc_base + oc_off, vl);
+                vuint32m4_t v_lshift = __riscv_vzext_vf4_u32m4(
+                    __riscv_vle8_v_u8m1(
+                        lshift_data.get() + oc_base + oc_off, vl), vl);
+                vuint32m4_t v_rshift = __riscv_vzext_vf4_u32m4(
+                    __riscv_vle8_v_u8m1(
+                        rshift_data.get() + oc_base + oc_off, vl), vl);
+
                 for (int p = 0; p < p_tile; p++) {
-                    std::memcpy(
-                        output_data + (p_base + p) * output_depth + oc_base,
-                        tmp_out.get() + p * oc_tile,
-                        oc_tile);
+                    // Load raw MXU accumulator for this pixel row
+                    vint32m4_t acc = __riscv_vle32_v_i32m4(
+                        &acc_buf[p * 16 + oc_off], vl);
+
+                    // Add combined bias
+                    acc = __riscv_vadd_vv_i32m4(acc, bias_vec, vl);
+
+                    // Quantize
+                    vint8m1_t out8 = QuantizeResult_m4(
+                        acc, v_mult, v_lshift, v_rshift,
+                        output_offset, output_min, output_max, vl);
+
+                    // Store to output
+                    __riscv_vse8_v_i8m1(
+                        output_data
+                            + (p_base + p) * output_depth
+                            + oc_base + oc_off,
+                        out8, vl);
                 }
+
+                oc_off += vl;
+                oc_rem -= vl;
             }
-        }
-    }
+        } // end oc tile loop
+    } // end pixel tile loop
 }
 
 } // anonymous namespace
@@ -357,6 +363,7 @@ void MxuConvPerChannel(
             bias_shape,   bias_data,
             output_shape, output_data);
     } else {
+        // Fallback to RVV
         coralnpu_v2::opt::litert_micro::ConvPerChannel(
             params, output_multiplier, output_shift,
             input_shape,  input_data,
@@ -414,6 +421,12 @@ TfLiteStatus MxuConvEval(TfLiteContext* context, TfLiteNode* node) {
         tflite::micro::GetTensorData<int8_t>(output));
 
     return kTfLiteOk;
+}
+
+TFLMRegistration Register_MXU_CONV_2D() {
+  auto registration = tflite::Register_CONV_2D();
+  registration.invoke = MxuConvEval;
+  return registration;
 }
 
 }  // namespace coralnpu_v2::opt::litert_micro
