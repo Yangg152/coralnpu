@@ -3713,13 +3713,13 @@ module rvv_backend_decode_unit_ari
                   uop_class[i] = XXX;  // 只用 rs1 标量
               end
               MXU_MLOAD_W: begin
-                  uop_class[i] = XXV;  // 只读 vs2
+                  uop_class[i] = XVX;  // 需要读 vs2
               end
               MXU_MLOAD_A: begin
-                  uop_class[i] = XXV;  // 只读 vs2，rs1 携带 row
+                  uop_class[i] = XVX;  // 需要读 vs2
               end
               MXU_MSTORE: begin
-                  uop_class[i] = XXX;  // 结果从 MXU 内部读
+                  uop_class[i] = VXX;  // 结果写入 vd
               end
               default: begin
                   uop_class[i] = XXX;  // MZERO, MMA, MFENCE
