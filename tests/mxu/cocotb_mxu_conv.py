@@ -623,12 +623,12 @@ async def test_mxu_unaligned_small(dut):
 #     await t.load_and_populate_input(dut)
 #     await t.test(ref_target=500_000, opt_target=200_000, run_ref=True, check_python=True)
 
-# @cocotb.test()
-# async def benchmark_mxu_mobilenet_v1_pw1(dut):
-#     """Benchmark: MobileNetV1 第一个 Pointwise Conv (1x1)"""
-#     t = ConvTest(in_ch=16, out_ch=32, h=32, w=32, kernel_size=1)
-#     await t.load_and_populate_input(dut)
-#     await t.test(ref_target=80_000_000, opt_target=5_000_000, run_ref=False, check_python=True)
+@cocotb.test()
+async def benchmark_mxu_mobilenet_v1_pw1(dut):
+    """Benchmark: MobileNetV1 第一个 Pointwise Conv (1x1)"""
+    t = ConvTest(in_ch=16, out_ch=32, h=32, w=32, kernel_size=1)
+    await t.load_and_populate_input(dut)
+    await t.test(ref_target=80_000_000, opt_target=5_000_000, run_ref=False, check_python=True)
 
 # @cocotb.test()
 # async def benchmark_mxu_vww_first_layer(dut):

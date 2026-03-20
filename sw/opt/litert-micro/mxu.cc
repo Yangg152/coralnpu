@@ -153,11 +153,22 @@ void Conv1x1PerChannel_MXU(
     auto combined_bias = make_aligned_array<int32_t>(16, output_depth);
     if (!combined_bias) return;
     for (int oc = 0; oc < output_depth; oc++) {
-        int32_t fsum = 0;
         const int8_t* fp = filter_data + oc * input_depth;
-        for (int ic = 0; ic < input_depth; ic++) fsum += fp[ic];
-        combined_bias[oc] = (bias_data ? bias_data[oc] : 0)
-                          + input_offset * fsum;
+        int32_t fsum = 0;
+        int remaining = input_depth;
+        const int8_t* p = fp;
+        while (remaining > 0) {
+            size_t vl = __riscv_vsetvl_e8m4(remaining);
+            vint8m4_t v = __riscv_vle8_v_i8m4(p, vl);
+            vint16m8_t v16 = __riscv_vsext_vf2_i16m8(v, vl);
+            // widening reduction or tree reduce
+            vint32m1_t vsum = __riscv_vmv_s_x_i32m1(0, 1);
+            vsum = __riscv_vwredsum_vs_i16m8_i32m1(v16, vsum, vl);
+            fsum += __riscv_vmv_x_s_i32m1_i32(vsum);
+            p += vl;
+            remaining -= vl;
+        }
+        combined_bias[oc] = (bias_data ? bias_data[oc] : 0) + input_offset * fsum;
     }
 
     // Repack weights: [oc_tile][k][16] with dim-16 = oc within tile
