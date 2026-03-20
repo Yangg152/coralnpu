@@ -35,7 +35,7 @@ localparam [2:0]
     OP_MLOAD_A = 3'd2,
     OP_MZERO   = 3'd3,
     OP_MMA     = 3'd4,
-    OP_MSTORE  = 3'd7,
+    OP_MSTORE  = 3'd5,
     OP_MFENCE  = 3'd6;
 
 localparam [3:0]
@@ -292,5 +292,57 @@ always @(posedge clk or negedge rst_n) begin
         endcase
     end
 end
+
+// Debug displays
+// always @(posedge clk) begin
+//     if (op_valid && op_ready) begin
+//         $display("[MXU-DBG] T=%0t op_type=%0d uop_last=%0b cfg_Tk=%0d state=%0d",
+//                  $time, op_type, uop_last, cfg_Tk, state);
+//     end
+
+//     if (state == S_LOAD_W && weight_valid) begin
+//         $display("[MXU-DBG] T=%0t LOAD_W beat load_cnt=%0d last=%0b w[0]=%0d w[1]=%0d",
+//                  $time, load_cnt, uop_last, $signed(weight_vec[7:0]), $signed(weight_vec[15:8]));
+//     end
+
+//     if (state == S_LOAD_A && act_valid) begin
+//         $display("[MXU-DBG] T=%0t LOAD_A beat row=%0d chunk=%0d last=%0b a[0]=%0d a[1]=%0d",
+//                  $time, a_row, a_chunk, uop_last, $signed(act_vec[7:0]), $signed(act_vec[15:8]));
+//     end
+
+//     if (op_valid && op_ready && op_type == OP_MLOAD_W) begin
+//         $display("[MXU-DBG] T=%0t LOAD_W first-beat load_cnt=%0d last=%0b w[0]=%0d",
+//                  $time, load_cnt, uop_last, $signed(weight_vec[7:0]));
+//     end
+
+//     if (op_valid && op_ready && op_type == OP_MLOAD_A) begin
+//         $display("[MXU-DBG] T=%0t LOAD_A first-beat row=%0d chunk=%0d last=%0b a[0]=%0d",
+//                  $time, a_row, a_chunk, uop_last, $signed(act_vec[7:0]));
+//     end
+
+//     if (state == S_COMPUTE) begin
+//         if (k_cnt <= 2 || k_cnt >= {1'b0, cfg_Tk_r} - 1)
+//             $display("[MXU-DBG] T=%0t COMPUTE k_cnt=%0d pe_en=%0b abuf[0][%0d]=%0d wbuf[%0d][0]=%0d",
+//                      $time, k_cnt, pe_en, k_cnt[6:0], abuf[0][k_cnt[6:0]], k_cnt[6:0], wbuf[k_cnt[6:0]][0]);
+//     end
+
+//     if (state == S_COMPUTE && k_cnt == {1'b0, cfg_Tk_r}) begin
+//         $display("[MXU-DBG] T=%0t MMA DONE acc[0][0]=%0d acc[0][1]=%0d acc[1][0]=%0d",
+//                  $time, pe_acc_out[0][0], pe_acc_out[0][1], pe_acc_out[1][0]);
+//     end
+
+//     if (op_valid && op_type == OP_MSTORE) begin
+//         $display("[MXU-DBG] T=%0t MSTORE flush_cnt=%0d data=%h acc[row][0..3]=%0d,%0d,%0d,%0d",
+//                  $time, flush_cnt, flush_data_comb,
+//                  pe_acc_out[flush_cnt[5:2]][0],
+//                  pe_acc_out[flush_cnt[5:2]][1],
+//                  pe_acc_out[flush_cnt[5:2]][2],
+//                  pe_acc_out[flush_cnt[5:2]][3]);
+//     end
+
+//     if (pe_acc_clear) begin
+//         $display("[MXU-DBG] T=%0t MZERO acc_clear asserted", $time);
+//     end
+// end
 
 endmodule

@@ -153,7 +153,7 @@ module rvv_backend_mxu_wrapper (
     always_comb begin
         result_ex2rob[0]           = '0;
         result_ex2rob[0].rob_entry = rob_entry_d1;
-        if (op_type_d1 == 3'd7) begin  // MSTORE
+        if (op_type_d1 == 3'd5) begin  // MSTORE
             result_ex2rob[0].w_valid = 1'b1;
             result_ex2rob[0].w_data  = {{(`VLEN-128){1'b0}}, mxu_result_data};
         end else begin
@@ -162,5 +162,21 @@ module rvv_backend_mxu_wrapper (
         result_ex2rob[0].vsaturate = '0;
     end
     
+    // initial begin
+    //     $display("[MXU Wrapper] Module instantiated and simulation started!");
+    // end
+    
+    // // 在 rvv_backend_mxu_wrapper.sv 的 always block 或 initial block 附近加：
+    // always @(posedge clk) begin
+    //     if (pop_ex2rs[0]) begin
+    //         $display("[MXU-WRAP] T=%0t pop! op=%0d rs1_data=0x%h rs1_valid=%b funct6=%b funct3=%b vm=%b",
+    //                 $time, op_type,
+    //                 mxu_uop_rs2ex[0].rs1_data,
+    //                 mxu_uop_rs2ex[0].rs1_data_valid,
+    //                 mxu_uop_rs2ex[0].uop_funct6,
+    //                 mxu_uop_rs2ex[0].uop_funct3,
+    //                 mxu_uop_rs2ex[0].vm);
+    //     end
+    // end
 
 endmodule

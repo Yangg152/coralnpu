@@ -63,17 +63,6 @@ class RvvCompressedInstruction extends Bundle {
     (opcode === RvvCompressedOpcode.RVVALU) && (funct3() === "b001".U)
   }
 
-  // luoyang: check if this is an MSTORE encoded via OPIVI (funct3=011, funct6=111111)
-  def isMxuMstoreViaOpivi(): Bool = {
-    (opcode === RvvCompressedOpcode.RVVALU) && (funct3() === "b011".U) && (funct6() === "b111111".U)
-  }
-
-  // luoyang: helper — MXU instructions that do NOT write vector registers
-  // (everything except MSTORE which has funct6=111111)
-  private def isMxuNonStore(): Bool = {
-    isMxu() && (funct6() =/= "b111111".U)
-  }
-
   // These instructions need to trap when vstart is not zero. This includes
   // all reduction instructions.
   def requireZeroVstart(): Bool = {
@@ -138,12 +127,17 @@ class RvvCompressedInstruction extends Bundle {
     (opcode === RvvCompressedOpcode.RVVALU && funct3() === "b010".U && funct6() === "b010000".U)
   }
 
-  // luoyang: MSTORE writes to a vector register (vd), and MXU instructions
-  // via OPMXU that are NOT MSTORE do not write vector registers.
+//luoyang
   def writesVectorRegister(): Bool = {
-    opcode === RvvCompressedOpcode.RVVLOAD ||
-    (opcode === RvvCompressedOpcode.RVVALU && !writesRd() && !isMxuNonStore())
+      opcode === RvvCompressedOpcode.RVVLOAD ||
+      (opcode === RvvCompressedOpcode.RVVALU && !writesRd() && !isMxuNonStore())
   }
+
+  // MXU instructions that do NOT write a vector register
+  private def isMxuNonStore(): Bool = {
+      isMxu() && (funct6() =/= "b000101".U)
+  }
+//luoyang
 
   override def toPrintable: Printable = {
     cf"[opcode=$opcode, bits=$bits%b]"
@@ -379,7 +373,7 @@ class RvvS1DecodeInstructionBase {
       (funct6 === "b000010".U) ||  // MXU_MLOAD_A
       (funct6 === "b000011".U) ||  // MXU_MZERO
       (funct6 === "b000100".U) ||  // MXU_MMA
-      (funct6 === "b111111".U) ||  // MXU_MSTORE
+      (funct6 === "b000101".U) ||  // MXU_MSTORE
       (funct6 === "b000110".U)     // MXU_MFENCE
     )
 

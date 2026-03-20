@@ -33,7 +33,8 @@ void mxu_mcfg(uint32_t config_val) {
     );
 }
 
-static void mxu_mload_a_from_mem(const int8_t* src, bool is_last) {
+static inline __attribute__((always_inline))
+void mxu_mload_a_from_mem(const int8_t* src, bool is_last) {
     if (is_last) {
         asm volatile(
             "vsetvli zero, %1, e8, m1, ta, ma\n\t"
@@ -55,7 +56,8 @@ static void mxu_mload_a_from_mem(const int8_t* src, bool is_last) {
     }
 }
 
-static void mxu_mload_w_from_mem(const int8_t* src, bool is_last) {
+static inline __attribute__((always_inline))
+void mxu_mload_w_from_mem(const int8_t* src, bool is_last) {
     if (is_last) {
         asm volatile(
             "vsetvli zero, %1, e8, m1, ta, ma\n\t"
@@ -77,12 +79,6 @@ static void mxu_mload_w_from_mem(const int8_t* src, bool is_last) {
     }
 }
 
-static void mxu_mload_w_vec(vint8m1_t v_weight, bool is_last) {
-    int8_t buf[16] __attribute__((aligned(16)));
-    __riscv_vse8_v_i8m1(buf, v_weight, 16);
-    mxu_mload_w_from_mem(buf, is_last);
-}
-
 static inline __attribute__((always_inline))
 void mxu_mzero() {
     asm volatile(".word 0x0E001057" ::: "memory");
@@ -96,7 +92,7 @@ void mxu_mma() {
 static inline __attribute__((always_inline))
 void mxu_mstore_to_mem(int32_t* dst) {
     asm volatile(
-        ".word 0xFE001857\n\t"
+        ".word 0x16001857\n\t"
         "vsetvli zero, %1, e32, m1, ta, ma\n\t"
         "vse32.v v16, (%0)"
         :: "r"(dst), "r"(4)
@@ -108,7 +104,6 @@ static inline __attribute__((always_inline))
 void mxu_mfence() {
     asm volatile(".word 0x1A001057" ::: "memory");
 }
-
 
 // =============================================================================
 // Internal implementation
@@ -130,7 +125,23 @@ aligned_array<T> make_aligned_array(size_t alignment, size_t nmemb) {
   return aligned_array<T>(reinterpret_cast<T*>(ptr));
 }
 
-void Conv1x1PerChannel_MXU_Optimized(
+// -----------------------------------------------------------------------------
+// MXU 1x1 convolution with correct quantization math
+//
+// TFLite quantized conv computes:
+//   acc[p][oc] = sum_ic( (input[p][ic] + input_offset) * filter[oc][ic] ) + bias[oc]
+//
+// We decompose this as:
+//   acc[p][oc] = sum_ic( input[p][ic] * filter[oc][ic] )          ... (A) MXU does this
+//              + input_offset * sum_ic( filter[oc][ic] )           ... (B) precomputed
+//              + bias[oc]                                          ... (C) from bias_data
+//
+// MXU computes (A) using raw int8 values (no offset applied to activations).
+// Term (B) + (C) is a per-channel constant added after MXU readout.
+//
+// This avoids the int8 overflow problem of adding input_offset to activations.
+// -----------------------------------------------------------------------------
+void Conv1x1PerChannel_MXU(
     const ConvParams&   params,
     const int32_t*      output_multiplier,
     const int32_t*      output_shift,
@@ -147,63 +158,170 @@ void Conv1x1PerChannel_MXU_Optimized(
     const int output_depth = output_shape.Dims(3);
     const int batches      = input_shape.Dims(0);
     const int num_pixels   = batches * input_shape.Dims(1) * input_shape.Dims(2);
-    const int Tk           = input_depth;
-    const int num_chunks   = Tk / 16;
 
-    // Step 1: mcfg — 直接用 li 把值放到 a0
+    const int32_t input_offset  = params.input_offset;
+    const int32_t output_offset = params.output_offset;
+    const int8_t  output_min    = (int8_t)params.quantized_activation_min;
+    const int8_t  output_max    = (int8_t)params.quantized_activation_max;
+
+    const int Tk = input_depth;
+    const int num_chunks = Tk / 16;
+
+    // Prepare shift params for PostprocessAcc
+    auto lshift_data = make_aligned_array<uint8_t>(16, output_depth);
+    auto rshift_data = make_aligned_array<uint8_t>(16, output_depth);
+    if (!lshift_data || !rshift_data) return;
+    PrepareShiftParams(lshift_data.get(), rshift_data.get(),
+                       output_shift, output_depth);
+
+    // Precompute per-channel bias correction:
+    //   combined_bias[oc] = bias[oc] + input_offset * sum_ic(filter[oc][ic])
+    auto combined_bias = make_aligned_array<int32_t>(16, output_depth);
+    if (!combined_bias) return;
+    for (int oc = 0; oc < output_depth; oc++) {
+        int32_t filter_sum = 0;
+        const int8_t* f_ptr = filter_data + oc * input_depth;
+        for (int ic = 0; ic < input_depth; ic++) {
+            filter_sum += f_ptr[ic];
+        }
+        int32_t bias_val = bias_data ? bias_data[oc] : 0;
+        combined_bias[oc] = bias_val + input_offset * filter_sum;
+    }
+
+    // Weight tile buffer: Tk rows × 16 cols
+    auto wt_tile = make_aligned_array<int8_t>(16, Tk * 16);
+    if (!wt_tile) return;
+
+    // Accumulator readout buffer: 16 rows × 16 cols int32
+    int32_t acc_buf[16 * 16] __attribute__((aligned(16)));
+
+    // Temporary output buffer for PostprocessAcc when output_depth > 16
+    // PostprocessAcc writes with stride = out_d, but we need stride = output_depth
+    auto tmp_out = make_aligned_array<int8_t>(16, 16 * 16);
+    if (!tmp_out) return;
+
+    // Configure MXU
     {
         uint32_t cfg = (uint32_t)(Tk & 0xFF) | 0x100;
-        asm volatile(
-            "mv a0, %0\n\t"
-            ".word 0x02051057"
-            :: "r"(cfg)
-            : "a0", "memory"
-        );
+        mxu_mcfg(cfg);
     }
 
-    // Step 2: mload_w — Tk 次
-    {
-        int8_t ones[16] __attribute__((aligned(16)));
-        for (int i = 0; i < 16; i++) ones[i] = 1;
+    // Tile over output channels in groups of 16
+    for (int oc_base = 0; oc_base < output_depth; oc_base += 16) {
+        const int oc_tile = std::min(16, output_depth - oc_base);
+
+        // ---- Pack weight tile ----
+        // MXU weight row k = { filter[oc_base+j][k] } for j=0..15
         for (int k = 0; k < Tk; k++) {
-            mxu_mload_w_from_mem(ones, (k == Tk - 1));
+            int8_t* dst_row = wt_tile.get() + k * 16;
+            for (int j = 0; j < 16; j++) {
+                if (j < oc_tile) {
+                    dst_row[j] = filter_data[(oc_base + j) * input_depth + k];
+                } else {
+                    dst_row[j] = 0;
+                }
+            }
         }
-    }
-    mxu_mfence();
 
-    // Step 3: mzero
-    mxu_mzero();
-
-    // Step 4: mload_a — 16 rows × num_chunks
-    {
-        int8_t ones[16] __attribute__((aligned(16)));
-        for (int i = 0; i < 16; i++) ones[i] = 1;
-        int total_beats = 16 * num_chunks;
-        for (int beat = 0; beat < total_beats; beat++) {
-            mxu_mload_a_from_mem(ones, (beat == total_beats - 1));
+        // ---- Load weights into MXU ----
+        for (int k = 0; k < Tk; k++) {
+            mxu_mload_w_from_mem(wt_tile.get() + k * 16, (k == Tk - 1));
         }
-    }
+        mxu_mfence();
 
-    // Step 5: mma + fence
-    mxu_mma();
-    mxu_mfence();
+        // Tile over pixels in groups of 16
+        for (int p_base = 0; p_base < num_pixels; p_base += 16) {
+            const int p_tile = std::min(16, num_pixels - p_base);
 
-    // Step 6: mstore — 64 次
-    int32_t acc_buf[256] __attribute__((aligned(16)));
-    std::memset(acc_buf, 0xAB, sizeof(acc_buf));
-    for (int i = 0; i < 64; i++) {
-        mxu_mstore_to_mem(&acc_buf[i * 4]);
-    }
-    mxu_mfence();
+            // ---- Zero accumulators ----
+            mxu_mzero();
 
-    // Step 7: 直接把 raw int32 截断输出，不 clamp
-    // 这样如果 acc=16，output=16；如果 acc=0xABABABAB，output=0xAB=-85
-    int total = num_pixels * output_depth;
-    for (int i = 0; i < total; i++) {
-        output_data[i] = static_cast<int8_t>(acc_buf[i % 256] & 0xFF);
+            // ---- Load activations (raw, no offset) ----
+            // Beat order: row0-chunk0, row1-chunk0, ..., row15-chunk0,
+            //             row0-chunk1, ..., row15-chunk(num_chunks-1)
+            {
+                int total_beats = 16 * num_chunks;
+                int beat = 0;
+                for (int chunk = 0; chunk < num_chunks; chunk++) {
+                    for (int row = 0; row < 16; row++) {
+                        if (row < p_tile) {
+                            const int8_t* src =
+                                input_data + (p_base + row) * input_depth
+                                + chunk * 16;
+                            mxu_mload_a_from_mem(src, (beat == total_beats - 1));
+                        } else {
+                            // Zero-pad for unused rows
+                            int8_t zeros[16] __attribute__((aligned(16))) = {0};
+                            mxu_mload_a_from_mem(zeros, (beat == total_beats - 1));
+                        }
+                        beat++;
+                    }
+                }
+            }
+
+            // ---- Compute ----
+            mxu_mma();
+            mxu_mfence();
+
+            // ---- Read out accumulators ----
+            // 64 MSTORE calls, each returns 4 int32
+            // Layout: call i → acc_buf[i*4 .. i*4+3]
+            // Row r, col group g (g=0..3): call index = r*4 + g
+            // acc_buf[r*16 + g*4 + 0..3]
+            for (int i = 0; i < 64; i++) {
+                mxu_mstore_to_mem(&acc_buf[i * 4]);
+            }
+            mxu_mfence();
+
+            // ---- Postprocess ----
+            // acc_buf[row * 16 + col] contains raw MXU result (term A)
+            // We need to add combined_bias (terms B + C) before requantize
+            //
+            // PostprocessAcc expects accs WITHOUT bias (it adds bias internally),
+            // so we pass combined_bias as the bias pointer.
+            //
+            // When output_depth == 16, we can write directly.
+            // Otherwise, write to tmp_out then scatter.
+            if (output_depth == 16) {
+                // Direct write: PostprocessAcc stride matches output stride
+                PostprocessAcc(
+                    acc_buf,
+                    combined_bias.get() + oc_base,
+                    lshift_data.get() + oc_base,
+                    output_multiplier + oc_base,
+                    rshift_data.get() + oc_base,
+                    output_offset,
+                    output_min,
+                    output_max,
+                    output_data + p_base * output_depth + oc_base,
+                    p_tile,
+                    oc_tile);
+            } else {
+                // Write to temp buffer, then scatter to output
+                PostprocessAcc(
+                    acc_buf,
+                    combined_bias.get() + oc_base,
+                    lshift_data.get() + oc_base,
+                    output_multiplier + oc_base,
+                    rshift_data.get() + oc_base,
+                    output_offset,
+                    output_min,
+                    output_max,
+                    tmp_out.get(),
+                    p_tile,
+                    oc_tile);
+
+                // Scatter: tmp_out[p * oc_tile + j] → output[p_base+p][oc_base+j]
+                for (int p = 0; p < p_tile; p++) {
+                    std::memcpy(
+                        output_data + (p_base + p) * output_depth + oc_base,
+                        tmp_out.get() + p * oc_tile,
+                        oc_tile);
+                }
+            }
+        }
     }
 }
-
 
 } // anonymous namespace
 
@@ -232,7 +350,7 @@ void MxuConvPerChannel(
     const bool depth_ok   = (input_depth > 0) && (input_depth % 16 == 0);
 
     if (is_1x1 && is_stride1 && depth_ok) {
-        Conv1x1PerChannel_MXU_Optimized(
+        Conv1x1PerChannel_MXU(
             params, output_multiplier, output_shift,
             input_shape,  input_data,
             filter_shape, filter_data,

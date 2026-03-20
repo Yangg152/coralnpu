@@ -363,8 +363,9 @@ module RvvFrontEnd#(parameter N = 4,
       unaligned_cmd_data[i].bits = inst_q[i].bits;
       unaligned_cmd_data[i].arch_state = inst_config_state[i+1];
       // TODO: Handle rs propagation for loads/stores
+      //luoyang
       unaligned_cmd_data[i].rs1 =
-          inst_q[i].bits[7] ? reg_read_data_i[2*i] : 0;
+          inst_q[i].bits[7] || (inst_q[i].opcode == RVV && inst_q[i].bits[7:5] == 3'b001) ? reg_read_data_i[2*i] : 0;
 
       // Write new value of vl into rd for configuration function.
       reg_write_valid_o[i] = is_setvl[i];
@@ -417,6 +418,7 @@ module RvvFrontEnd#(parameter N = 4,
       lsu_requires_rs1_read[i] = (inst_q[i].opcode != RVV);
       // Non LSU rs1 check
       non_lsu_requires_rs1_read[i] = (inst_q[i].opcode == RVV) && (
+        (inst_q[i].bits[7:5] == 'b001) ||  // OPMXU
         (inst_q[i].bits[7:5] == 'b100) ||  // OPIVX
         (inst_q[i].bits[7:5] == 'b110) ||  // OPMVX
         ((inst_q[i].bits[7:5] == 'b111) && (inst_q[i].bits[24:23] != 2'b11))  // vsetvl and vsetvli

@@ -25,3 +25,9 @@ coralnpu_v2_binary(
     name = "coralnpu_v2_rvv_add_intrinsic",
     srcs = ["rvv_add_intrinsic.cc"],
 )
+
+coralnpu_v2_binary(
+    name = "mxu_test",
+    srcs = ["mxu_test.cc"],
+)
+

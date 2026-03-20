@@ -70,7 +70,6 @@ static inline void mxu_mload_w(int vs2, int is_last) {
     // funct6=1, vm=!is_last, vs2=vs2, vs1=0, vd=0
     // 需要动态构建... 用 v16 作为 vs2
     // 简化: 总是用 v16 作为中转寄存器
-    uint32_t vm = is_last ? 0 : 1;
     // funct6=1=000001, vm, vs2=10000(v16), vs1=0, funct3=001, vd=0
     // vm=1: 000001 1 10000 00000 001 00000 1010111 = 0x07001057
     // vm=0: 000001 0 10000 00000 001 00000 1010111 = 0x05001057

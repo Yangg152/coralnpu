@@ -226,7 +226,7 @@ typedef enum logic [3:0] {
   parameter MXU_MLOAD_A     = 6'b000_010; // 载入激活指令
   parameter MXU_MZERO       = 6'b000_011; // 累加器清零指令
   parameter MXU_MMA         = 6'b000_100; // 矩阵乘加指令
-  parameter MXU_MSTORE      = 6'b111_111; // 结果写回指令
+  parameter MXU_MSTORE      = 6'b000_101; // 结果写回指令
   parameter MXU_MFENCE      = 6'b000_110; // 矩阵同步屏障指令
 //luoyang
 

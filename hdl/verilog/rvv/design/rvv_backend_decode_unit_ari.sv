@@ -167,10 +167,7 @@ module rvv_backend_decode_unit_ari
         valid_opi = inst_valid;
       end
       OPIVI: begin
-        if (inst_funct6 == MXU_MSTORE)
-          valid_mxu = inst_valid;
-        else
-          valid_opi = inst_valid;
+        valid_opi = inst_valid;
       end
       OPMVV,
       OPMVX: begin
@@ -810,32 +807,6 @@ module rvv_backend_decode_unit_ari
               end
             endcase
           end
-          //luoyang
-          MXU_MSTORE: begin
-            case(csr_lmul)
-              LMUL1_4, LMUL1_2, LMUL1: begin
-                emul_vd  = EMUL1;
-                emul_vs2 = EMUL1;
-                emul_vs1 = EMUL1;
-              end
-              LMUL2: begin
-                emul_vd  = EMUL2;
-                emul_vs2 = EMUL2;
-                emul_vs1 = EMUL2;
-              end
-              LMUL4: begin
-                emul_vd  = EMUL4;
-                emul_vs2 = EMUL4;
-                emul_vs1 = EMUL4;
-              end
-              LMUL8: begin
-                emul_vd  = EMUL8;
-                emul_vs2 = EMUL8;
-                emul_vs1 = EMUL8;
-              end
-            endcase
-          end
-          //luoyang
         endcase
       end
 
@@ -1909,14 +1880,6 @@ module rvv_backend_decode_unit_ari
               end
             endcase
           end
-          //luoyang
-          MXU_MSTORE: begin
-            eew_vd  = EEW8;
-            eew_vs2 = EEW8;
-            eew_vs1 = EEW8;
-            eew_max = EEW8;
-          end
-          //luoyang
         endcase
       end
 
@@ -2744,11 +2707,6 @@ module rvv_backend_decode_unit_ari
             // destination register group cannot overlap the source register group
             check_special = check_vd_overlap_v0&check_vd_overlap_vs2;
           end
-          //luoyang
-          MXU_MSTORE: begin
-            check_special = 1'b1;
-          end
-          //luoyang
         endcase
       end
 
@@ -3141,16 +3099,11 @@ module rvv_backend_decode_unit_ari
 `endif
 
   // update uop funct3
-  //luoyang
   always_comb begin
     for(int i=0;i<`NUM_DE_UOP;i++) begin: GET_UOP_FUNCT3
-      if (valid_mxu && inst_funct3 == OPIVI)
-        uop_funct3[i] = OPMXU;
-      else
         uop_funct3[i] = inst_funct3;
     end
   end
-  //luoyang
 
   // update uop funct6
   always_comb begin
@@ -3849,12 +3802,6 @@ module rvv_backend_decode_unit_ari
                 ignore_vma[i] = 1'b1;
               end
             end
-            //luoyang
-            MXU_MSTORE: begin
-              ignore_vma[i] = 1'b1;
-              ignore_vta[i] = 1'b1;
-            end
-            //luoyang
           endcase
         end
 
@@ -5105,7 +5052,7 @@ module rvv_backend_decode_unit_ari
           endcase
         end
         //luoyang
-        OPMXU: begin
+        valid_mxu: begin
           case(funct6_ari.ari_funct6)
               MXU_MCFG: begin
                   rs1_data[i]       = rs1;
