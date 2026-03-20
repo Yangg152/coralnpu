@@ -26,11 +26,7 @@ using tflite::RuntimeShape;
 static inline __attribute__((always_inline))
 void mxu_mcfg(uint32_t config_val) {
     register uint32_t a0_val asm("a0") = config_val;
-    asm volatile(
-        ".word 0x02051057"
-        :: "r"(a0_val)
-        : "memory"
-    );
+    asm volatile(".word 0x02051057" :: "r"(a0_val) : "memory");
 }
 
 static inline __attribute__((always_inline))
@@ -40,17 +36,13 @@ void mxu_mload_a_from_mem(const int8_t* src, bool is_last) {
             "vsetvli zero, %1, e8, m1, ta, ma\n\t"
             "vle8.v v16, (%0)\n\t"
             ".word 0x09001057"
-            :: "r"(src), "r"(16)
-            : "memory", "v16"
-        );
+            :: "r"(src), "r"(16) : "memory", "v16");
     } else {
         asm volatile(
             "vsetvli zero, %1, e8, m1, ta, ma\n\t"
             "vle8.v v16, (%0)\n\t"
             ".word 0x0B001057"
-            :: "r"(src), "r"(16)
-            : "memory", "v16"
-        );
+            :: "r"(src), "r"(16) : "memory", "v16");
     }
 }
 
@@ -61,29 +53,21 @@ void mxu_mload_w_from_mem(const int8_t* src, bool is_last) {
             "vsetvli zero, %1, e8, m1, ta, ma\n\t"
             "vle8.v v16, (%0)\n\t"
             ".word 0x05001057"
-            :: "r"(src), "r"(16)
-            : "memory", "v16"
-        );
+            :: "r"(src), "r"(16) : "memory", "v16");
     } else {
         asm volatile(
             "vsetvli zero, %1, e8, m1, ta, ma\n\t"
             "vle8.v v16, (%0)\n\t"
             ".word 0x07001057"
-            :: "r"(src), "r"(16)
-            : "memory", "v16"
-        );
+            :: "r"(src), "r"(16) : "memory", "v16");
     }
 }
 
 static inline __attribute__((always_inline))
-void mxu_mzero() {
-    asm volatile(".word 0x0E001057" ::: "memory");
-}
+void mxu_mzero() { asm volatile(".word 0x0E001057" ::: "memory"); }
 
 static inline __attribute__((always_inline))
-void mxu_mma() {
-    asm volatile(".word 0x12001057" ::: "memory");
-}
+void mxu_mma() { asm volatile(".word 0x12001057" ::: "memory"); }
 
 static inline __attribute__((always_inline))
 void mxu_mstore_to_mem(int32_t* dst) {
@@ -91,15 +75,11 @@ void mxu_mstore_to_mem(int32_t* dst) {
         ".word 0x16001857\n\t"
         "vsetvli zero, %1, e32, m1, ta, ma\n\t"
         "vse32.v v16, (%0)"
-        :: "r"(dst), "r"(4)
-        : "memory", "v16"
-    );
+        :: "r"(dst), "r"(4) : "memory", "v16");
 }
 
 static inline __attribute__((always_inline))
-void mxu_mfence() {
-    asm volatile(".word 0x1A001057" ::: "memory");
-}
+void mxu_mfence() { asm volatile(".word 0x1A001057" ::: "memory"); }
 
 // =============================================================================
 // Internal implementation
@@ -107,7 +87,7 @@ void mxu_mfence() {
 namespace {
 
 struct AlignedFree {
-  void operator()(void* ptr) const { std::free(ptr); }
+    void operator()(void* ptr) const { std::free(ptr); }
 };
 
 template <typename T>
@@ -115,15 +95,12 @@ using aligned_array = std::unique_ptr<T[], AlignedFree>;
 
 template <typename T>
 aligned_array<T> make_aligned_array(size_t alignment, size_t nmemb) {
-  size_t raw_size = sizeof(T) * nmemb;
-  size_t aligned_size = ((raw_size + alignment - 1) / alignment) * alignment;
-  void* ptr = aligned_alloc(alignment, aligned_size);
-  return aligned_array<T>(reinterpret_cast<T*>(ptr));
+    size_t raw = sizeof(T) * nmemb;
+    size_t aligned = ((raw + alignment - 1) / alignment) * alignment;
+    void* ptr = aligned_alloc(alignment, aligned);
+    return aligned_array<T>(reinterpret_cast<T*>(ptr));
 }
 
-// =========================================================
-// RVV quantization helper (LMUL=4)
-// =========================================================
 inline __attribute__((always_inline)) vint8m1_t QuantizeResult_m4(
     vint32m4_t acc, vint32m4_t v_mult, vuint32m4_t v_lshift, vuint32m4_t v_rshift,
     int32_t output_offset, int32_t output_min, int32_t output_max, size_t vl) {
@@ -140,33 +117,23 @@ inline __attribute__((always_inline)) vint8m1_t QuantizeResult_m4(
 }
 
 // -----------------------------------------------------------------------------
-// MXU 1x1 convolution — activation-reuse optimized
-//
-// Key insight: MXU's abuf is NOT cleared by MLOAD_W, MZERO, or MMA.
-// So we load activations ONCE per pixel-tile, then iterate over all
-// oc-tiles reloading only weights each time.
-//
-// Loop order:  pixel_tile (outer) → oc_tile (inner)
-//   - MLOAD_A: once per pixel_tile
-//   - MLOAD_W + MZERO + MMA + MSTORE: once per (pixel_tile, oc_tile)
+// 1x1 pointwise convolution via MXU
+// A-matrix = pixels (loaded once per pixel tile, stays in abuf)
+// W-matrix = filter weights (reloaded per oc_tile)
+// Works for both large and small spatial sizes
 // -----------------------------------------------------------------------------
 void Conv1x1PerChannel_MXU(
-    const ConvParams&   params,
-    const int32_t*      output_multiplier,
-    const int32_t*      output_shift,
-    const RuntimeShape& input_shape,
-    const int8_t* __restrict__ input_data,
-    const RuntimeShape& filter_shape,
-    const int8_t* __restrict__ filter_data,
-    const RuntimeShape& bias_shape,
-    const int32_t* __restrict__ bias_data,
-    const RuntimeShape& output_shape,
-    int8_t* __restrict__ output_data)
+    const ConvParams& params, const int32_t* output_multiplier,
+    const int32_t* output_shift,
+    const RuntimeShape& input_shape, const int8_t* input_data,
+    const RuntimeShape& filter_shape, const int8_t* filter_data,
+    const RuntimeShape& bias_shape, const int32_t* bias_data,
+    const RuntimeShape& output_shape, int8_t* output_data)
 {
     const int input_depth  = input_shape.Dims(3);
     const int output_depth = output_shape.Dims(3);
-    const int batches      = input_shape.Dims(0);
-    const int num_pixels   = batches * input_shape.Dims(1) * input_shape.Dims(2);
+    const int num_pixels   = input_shape.Dims(0) * input_shape.Dims(1)
+                           * input_shape.Dims(2);
 
     const int32_t input_offset  = params.input_offset;
     const int32_t output_offset = params.output_offset;
@@ -174,124 +141,93 @@ void Conv1x1PerChannel_MXU(
     const int32_t output_max    = params.quantized_activation_max;
 
     const int Tk = input_depth;
-    const int num_chunks = Tk / 16;
+    const int num_chunks   = Tk / 16;
     const int num_oc_tiles = (output_depth + 15) / 16;
 
-    // ---- Prepare per-channel quantization shift params ----
     auto lshift_data = make_aligned_array<uint8_t>(16, output_depth);
     auto rshift_data = make_aligned_array<uint8_t>(16, output_depth);
     if (!lshift_data || !rshift_data) return;
     PrepareShiftParams(lshift_data.get(), rshift_data.get(),
                        output_shift, output_depth);
 
-    // ---- Precompute combined_bias[oc] = bias[oc] + input_offset * Σ filter[oc][ic] ----
     auto combined_bias = make_aligned_array<int32_t>(16, output_depth);
     if (!combined_bias) return;
     for (int oc = 0; oc < output_depth; oc++) {
         int32_t fsum = 0;
         const int8_t* fp = filter_data + oc * input_depth;
-        for (int ic = 0; ic < input_depth; ic++) {
-            fsum += fp[ic];
-        }
+        for (int ic = 0; ic < input_depth; ic++) fsum += fp[ic];
         combined_bias[oc] = (bias_data ? bias_data[oc] : 0)
                           + input_offset * fsum;
     }
 
-    // ---- Pre-pack ALL weight tiles contiguously ----
-    // Layout: wt_all[ oc_tile_idx * Tk * 16 + k * 16 + j ]
-    //   k = input channel index (0..Tk-1)
-    //   j = oc index within tile (0..15)
+    // Repack weights: [oc_tile][k][16] with dim-16 = oc within tile
     auto wt_all = make_aligned_array<int8_t>(16, num_oc_tiles * Tk * 16);
     if (!wt_all) return;
     for (int ot = 0; ot < num_oc_tiles; ot++) {
         const int oc_base = ot * 16;
         const int oc_tile = std::min(16, output_depth - oc_base);
-        for (int k = 0; k < Tk; k++) {
-            int8_t* dst = wt_all.get() + (ot * Tk + k) * 16;
-            for (int j = 0; j < 16; j++) {
-                dst[j] = (j < oc_tile)
-                    ? filter_data[(oc_base + j) * input_depth + k]
-                    : 0;
+        if (oc_tile == 16) {
+            for (int k = 0; k < Tk; k++) {
+                int8_t* dst = wt_all.get() + (ot * Tk + k) * 16;
+                for (int j = 0; j < 16; j++)
+                    dst[j] = filter_data[(oc_base + j) * input_depth + k];
+            }
+        } else {
+            for (int k = 0; k < Tk; k++) {
+                int8_t* dst = wt_all.get() + (ot * Tk + k) * 16;
+                std::memset(dst, 0, 16);
+                for (int j = 0; j < oc_tile; j++)
+                    dst[j] = filter_data[(oc_base + j) * input_depth + k];
             }
         }
     }
 
-    // MXU accumulator readout buffer: 16 rows × 16 cols int32
     int32_t acc_buf[16 * 16] __attribute__((aligned(16)));
     int8_t zeros[16] __attribute__((aligned(16))) = {0};
 
-    // ---- Configure MXU ----
-    {
-        uint32_t cfg = (uint32_t)(Tk & 0xFF) | 0x100;
-        mxu_mcfg(cfg);
-    }
+    mxu_mcfg((uint32_t)(Tk & 0xFF) | 0x100);
 
-    // ================================================================
-    // OUTER LOOP: pixel tiles
-    //   Load activation into MXU A-buffer ONCE per pixel tile.
-    //   abuf survives across MLOAD_W / MZERO / MMA / MSTORE.
-    // ================================================================
     for (int p_base = 0; p_base < num_pixels; p_base += 16) {
         const int p_tile = std::min(16, num_pixels - p_base);
 
-        // ---- Load activations into MXU A-buffer (once) ----
-        {
-            const int total_beats = 16 * num_chunks;
-            int beat = 0;
-            for (int row = 0; row < 16; row++) {
-                for (int chunk = 0; chunk < num_chunks; chunk++) {
-                    const int8_t* src;
-                    if (row < p_tile) {
-                        src = input_data
-                            + (p_base + row) * input_depth
-                            + chunk * 16;
-                    } else {
-                        src = zeros;
-                    }
-                    mxu_mload_a_from_mem(src, (beat == total_beats - 1));
-                    beat++;
-                }
+        // Load A once — abuf persists across W reloads and MMA calls
+        const int total_a_beats = 16 * num_chunks;
+        int beat = 0;
+        for (int row = 0; row < 16; row++) {
+            for (int chunk = 0; chunk < num_chunks; chunk++) {
+                const int8_t* src = (row < p_tile)
+                    ? input_data + (p_base + row) * input_depth + chunk * 16
+                    : zeros;
+                mxu_mload_a_from_mem(src, (beat == total_a_beats - 1));
+                beat++;
             }
         }
-        mxu_mfence();
+        // mxu_mfence();
 
-        // ============================================================
-        // INNER LOOP: oc tiles
-        //   Reload weights only; A-buffer is reused.
-        // ============================================================
+        // Sweep all oc_tiles — only W changes
         for (int ot = 0; ot < num_oc_tiles; ot++) {
             const int oc_base = ot * 16;
             const int oc_tile = std::min(16, output_depth - oc_base);
 
-            // ---- Load weights for this oc tile ----
             const int8_t* wt_base = wt_all.get() + ot * Tk * 16;
-            for (int k = 0; k < Tk; k++) {
+            for (int k = 0; k < Tk; k++)
                 mxu_mload_w_from_mem(wt_base + k * 16, (k == Tk - 1));
-            }
-            mxu_mfence();
+            // mxu_mfence();
 
-            // ---- Zero accumulators → MMA → fence ----
             mxu_mzero();
             mxu_mma();
-            mxu_mfence();
+            // mxu_mfence();
 
-            // ---- Read out 16×16 accumulator (64 MSTORE calls) ----
-            for (int i = 0; i < 64; i++) {
+            for (int i = 0; i < 64; i++)
                 mxu_mstore_to_mem(&acc_buf[i * 4]);
-            }
-            mxu_mfence();
+            // mxu_mfence();
 
-            // ---- RVV per-channel quantization ----
             int oc_off = 0;
             size_t oc_rem = oc_tile;
             while (oc_rem > 0) {
                 const size_t vl = __riscv_vsetvl_e32m4(oc_rem);
-
-                // Load combined bias for this oc slice
                 vint32m4_t bias_vec = __riscv_vle32_v_i32m4(
                     combined_bias.get() + oc_base + oc_off, vl);
-
-                // Load quantization params
                 vint32m4_t v_mult = __riscv_vle32_v_i32m4(
                     output_multiplier + oc_base + oc_off, vl);
                 vuint32m4_t v_lshift = __riscv_vzext_vf4_u32m4(
@@ -302,31 +238,22 @@ void Conv1x1PerChannel_MXU(
                         rshift_data.get() + oc_base + oc_off, vl), vl);
 
                 for (int p = 0; p < p_tile; p++) {
-                    // Load raw MXU accumulator for this pixel row
                     vint32m4_t acc = __riscv_vle32_v_i32m4(
                         &acc_buf[p * 16 + oc_off], vl);
-
-                    // Add combined bias
                     acc = __riscv_vadd_vv_i32m4(acc, bias_vec, vl);
-
-                    // Quantize
                     vint8m1_t out8 = QuantizeResult_m4(
                         acc, v_mult, v_lshift, v_rshift,
                         output_offset, output_min, output_max, vl);
-
-                    // Store to output
                     __riscv_vse8_v_i8m1(
-                        output_data
-                            + (p_base + p) * output_depth
+                        output_data + (p_base + p) * output_depth
                             + oc_base + oc_off,
                         out8, vl);
                 }
-
                 oc_off += vl;
                 oc_rem -= vl;
             }
-        } // end oc tile loop
-    } // end pixel tile loop
+        }
+    }
 }
 
 } // anonymous namespace
@@ -336,40 +263,31 @@ void Conv1x1PerChannel_MXU(
 // =============================================================================
 
 void MxuConvPerChannel(
-    const tflite::ConvParams&   params,
-    const int32_t*              output_multiplier,
-    const int32_t*              output_shift,
-    const tflite::RuntimeShape& input_shape,
-    const int8_t*               input_data,
-    const tflite::RuntimeShape& filter_shape,
-    const int8_t*               filter_data,
-    const tflite::RuntimeShape& bias_shape,
-    const int32_t*              bias_data,
-    const tflite::RuntimeShape& output_shape,
-    int8_t*                     output_data)
+    const ConvParams& params, const int32_t* output_multiplier,
+    const int32_t* output_shift,
+    const RuntimeShape& input_shape, const int8_t* input_data,
+    const RuntimeShape& filter_shape, const int8_t* filter_data,
+    const RuntimeShape& bias_shape, const int32_t* bias_data,
+    const RuntimeShape& output_shape, int8_t* output_data)
 {
-    const bool is_1x1     = (filter_shape.Dims(1) == 1 &&
-                              filter_shape.Dims(2) == 1);
-    const bool is_stride1 = (params.stride_width  == 1 &&
-                              params.stride_height == 1);
-    const int  input_depth = input_shape.Dims(3);
-    const bool depth_ok   = (input_depth > 0) && (input_depth % 16 == 0);
+    const int filter_height = filter_shape.Dims(1);
+    const int filter_width  = filter_shape.Dims(2);
+    const int input_depth   = input_shape.Dims(3);
 
-    if (is_1x1 && is_stride1 && depth_ok) {
+    const bool is_1x1    = (filter_height == 1 && filter_width == 1);
+    const bool is_stride1 = (params.stride_width == 1 && params.stride_height == 1);
+    const bool depth_16  = (input_depth > 0) && (input_depth % 16 == 0);
+
+    if (is_1x1 && is_stride1 && depth_16) {
         Conv1x1PerChannel_MXU(
             params, output_multiplier, output_shift,
-            input_shape,  input_data,
-            filter_shape, filter_data,
-            bias_shape,   bias_data,
-            output_shape, output_data);
+            input_shape, input_data, filter_shape, filter_data,
+            bias_shape, bias_data, output_shape, output_data);
     } else {
-        // Fallback to RVV
         coralnpu_v2::opt::litert_micro::ConvPerChannel(
             params, output_multiplier, output_shift,
-            input_shape,  input_data,
-            filter_shape, filter_data,
-            bias_shape,   bias_data,
-            output_shape, output_data);
+            input_shape, input_data, filter_shape, filter_data,
+            bias_shape, bias_data, output_shape, output_data);
     }
 }
 
@@ -392,24 +310,23 @@ TfLiteStatus MxuConvEval(TfLiteContext* context, TfLiteNode* node) {
     TfLiteEvalTensor* output =
         tflite::micro::GetEvalOutput(context, node, tflite::kConvOutputTensor);
 
-    tflite::ConvParams op_params;
-    op_params.padding_type =
-        tflite::micro::RuntimePaddingType(params->padding);
-    op_params.padding_values.width     = data.padding.width;
-    op_params.padding_values.height    = data.padding.height;
-    op_params.stride_width             = params->stride_width;
-    op_params.stride_height            = params->stride_height;
-    op_params.dilation_width_factor    = params->dilation_width_factor;
-    op_params.dilation_height_factor   = params->dilation_height_factor;
-    op_params.input_offset             = -data.input_zero_point;
-    op_params.weights_offset           = -data.filter_zero_point;
-    op_params.output_offset            = data.output_zero_point;
+    ConvParams op_params;
+    op_params.padding_type           = tflite::micro::RuntimePaddingType(
+                                           params->padding);
+    op_params.padding_values.width   = data.padding.width;
+    op_params.padding_values.height  = data.padding.height;
+    op_params.stride_width           = params->stride_width;
+    op_params.stride_height          = params->stride_height;
+    op_params.dilation_width_factor  = params->dilation_width_factor;
+    op_params.dilation_height_factor = params->dilation_height_factor;
+    op_params.input_offset           = -data.input_zero_point;
+    op_params.weights_offset         = -data.filter_zero_point;
+    op_params.output_offset          = data.output_zero_point;
     op_params.quantized_activation_min = data.output_activation_min;
     op_params.quantized_activation_max = data.output_activation_max;
 
     MxuConvPerChannel(
-        op_params,
-        data.per_channel_output_multiplier,
+        op_params, data.per_channel_output_multiplier,
         data.per_channel_output_shift,
         tflite::micro::GetTensorShape(input),
         tflite::micro::GetTensorData<int8_t>(input),
@@ -424,9 +341,9 @@ TfLiteStatus MxuConvEval(TfLiteContext* context, TfLiteNode* node) {
 }
 
 TFLMRegistration Register_MXU_CONV_2D() {
-  auto registration = tflite::Register_CONV_2D();
-  registration.invoke = MxuConvEval;
-  return registration;
+    auto registration = tflite::Register_CONV_2D();
+    registration.invoke = MxuConvEval;
+    return registration;
 }
 
-}  // namespace coralnpu_v2::opt::litert_micro
+} // namespace coralnpu_v2::opt::litert_micro

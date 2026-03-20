@@ -27,7 +27,7 @@ module rvv_backend_mxu_unit (
     output reg          mfence_done
 );
 
-localparam MAX_TK = 128;
+localparam MAX_TK = 256;
 
 localparam [2:0]
     OP_MCFG    = 3'd0,
@@ -49,28 +49,29 @@ localparam [3:0]
 
 reg [3:0]  state;
 reg [7:0]  cfg_Tk_r;
-reg [7:0]  num_a_chunks_r;  // cfg_Tk_r >> 4, cached on MCFG
+reg [8:0]  cfg_Tk_full;     // 9-bit: 真实 Tk 值 (1~256)
+reg [7:0]  num_a_chunks_r;  // cfg_Tk_full >> 4, MCFG 时缓存
 
 reg signed [7:0] wbuf [0:MAX_TK-1][0:15];
 reg signed [7:0] abuf [0:15][0:MAX_TK-1];
 
-reg [7:0]  load_cnt;      // MLOAD_W: k-row counter
-reg [3:0]  a_row;          // MLOAD_A: current row (0-15)
-reg [7:0]  a_chunk;        // MLOAD_A: current chunk within row
+reg [7:0]  load_cnt;      // MLOAD_W: k-row 计数器
+reg [3:0]  a_row;          // MLOAD_A: 当前行 (0-15)
+reg [7:0]  a_chunk;        // MLOAD_A: 当前行内的 chunk
 reg [8:0]  k_cnt;
 reg [5:0]  flush_cnt;
 
 assign act_ready = (state == S_LOAD_A);
 
 // -------------------------------------------------------------
-// 16x16 PE array
+// 16x16 PE 阵列
 // -------------------------------------------------------------
 wire        pe_en;
 wire        pe_acc_clear;
 wire signed [31:0] pe_acc_out [0:15][0:15];
 
 assign pe_acc_clear = (op_valid && op_type == OP_MZERO && (state == S_IDLE || state == S_READY));
-assign pe_en        = (state == S_COMPUTE && k_cnt < {1'b0, cfg_Tk_r});
+assign pe_en        = (state == S_COMPUTE && k_cnt < cfg_Tk_full);
 
 genvar gm, gn;
 generate
@@ -81,8 +82,8 @@ generate
                 .rst_n     (rst_n),
                 .en        (pe_en),
                 .acc_clear (pe_acc_clear),
-                .act_in    (abuf[gm][k_cnt[6:0]]),
-                .weight_in (wbuf[k_cnt[6:0]][gn]),
+                .act_in    (abuf[gm][k_cnt[7:0]]),
+                .weight_in (wbuf[k_cnt[7:0]][gn]),
                 .acc_out   (pe_acc_out[gm][gn])
             );
         end
@@ -92,7 +93,7 @@ endgenerate
 integer j;
 
 // -------------------------------------------------------------
-// MSTORE output data combinational logic
+// MSTORE 输出数据组合逻辑
 // -------------------------------------------------------------
 reg [127:0] flush_data_comb;
 always @(*) begin
@@ -116,7 +117,7 @@ always @(*) begin
     endcase
 end
 
-// Helper: advance a_row/a_chunk after one activation beat
+// 辅助任务: 推进 a_row/a_chunk 计数器
 task automatic advance_a_counters;
     if (a_chunk == num_a_chunks_r - 8'd1) begin
         a_chunk <= 8'd0;
@@ -126,14 +127,14 @@ task automatic advance_a_counters;
     end
 endtask
 
-// Helper: write one activation beat into abuf
+// 辅助任务: 将一个 activation beat 写入 abuf
 task automatic write_abuf_beat;
     for (j = 0; j < 16; j = j + 1)
         abuf[a_row][(a_chunk << 4) + j] <= $signed(act_vec[j*8 +: 8]);
 endtask
 
 // -------------------------------------------------------------
-// Main state machine
+// 主状态机
 // -------------------------------------------------------------
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -146,10 +147,11 @@ always @(posedge clk or negedge rst_n) begin
         load_cnt        <= 8'd0;
         a_row           <= 4'd0;
         a_chunk         <= 8'd0;
-        num_a_chunks_r  <= 8'd1;
+        num_a_chunks_r  <= 8'd4;
         k_cnt           <= 9'd0;
         flush_cnt       <= 6'd0;
         cfg_Tk_r        <= 8'd64;
+        cfg_Tk_full     <= 9'd64;
         result_data     <= 128'd0;
     end else begin
         op_done      <= 1'b0;
@@ -165,8 +167,12 @@ always @(posedge clk or negedge rst_n) begin
                 case (op_type)
                 OP_MCFG: begin
                     cfg_Tk_r       <= cfg_Tk;
-                    // Pre-compute chunks per row: max(1, cfg_Tk >> 4)
-                    num_a_chunks_r <= (cfg_Tk[7:4] == 4'd0) ? 8'd1 : {4'd0, cfg_Tk[7:4]};
+                    // 0 表示 256
+                    cfg_Tk_full    <= (cfg_Tk == 8'd0) ? 9'd256 : {1'b0, cfg_Tk};
+                    // chunks per row: 256>>4=16, 其他正常计算
+                    num_a_chunks_r <= (cfg_Tk == 8'd0) ? 8'd16
+                                   : (cfg_Tk[7:4] == 4'd0) ? 8'd1
+                                   : {4'd0, cfg_Tk[7:4]};
                     op_done        <= 1'b1;
                 end
 
@@ -263,7 +269,7 @@ always @(posedge clk or negedge rst_n) begin
 
         S_COMPUTE: begin
             result_valid <= 1'b0;
-            if (k_cnt < {1'b0, cfg_Tk_r}) begin
+            if (k_cnt < cfg_Tk_full) begin
                 k_cnt <= k_cnt + 9'd1;
             end else begin
                 op_done  <= 1'b1;
@@ -292,57 +298,5 @@ always @(posedge clk or negedge rst_n) begin
         endcase
     end
 end
-
-// Debug displays
-// always @(posedge clk) begin
-//     if (op_valid && op_ready) begin
-//         $display("[MXU-DBG] T=%0t op_type=%0d uop_last=%0b cfg_Tk=%0d state=%0d",
-//                  $time, op_type, uop_last, cfg_Tk, state);
-//     end
-
-//     if (state == S_LOAD_W && weight_valid) begin
-//         $display("[MXU-DBG] T=%0t LOAD_W beat load_cnt=%0d last=%0b w[0]=%0d w[1]=%0d",
-//                  $time, load_cnt, uop_last, $signed(weight_vec[7:0]), $signed(weight_vec[15:8]));
-//     end
-
-//     if (state == S_LOAD_A && act_valid) begin
-//         $display("[MXU-DBG] T=%0t LOAD_A beat row=%0d chunk=%0d last=%0b a[0]=%0d a[1]=%0d",
-//                  $time, a_row, a_chunk, uop_last, $signed(act_vec[7:0]), $signed(act_vec[15:8]));
-//     end
-
-//     if (op_valid && op_ready && op_type == OP_MLOAD_W) begin
-//         $display("[MXU-DBG] T=%0t LOAD_W first-beat load_cnt=%0d last=%0b w[0]=%0d",
-//                  $time, load_cnt, uop_last, $signed(weight_vec[7:0]));
-//     end
-
-//     if (op_valid && op_ready && op_type == OP_MLOAD_A) begin
-//         $display("[MXU-DBG] T=%0t LOAD_A first-beat row=%0d chunk=%0d last=%0b a[0]=%0d",
-//                  $time, a_row, a_chunk, uop_last, $signed(act_vec[7:0]));
-//     end
-
-//     if (state == S_COMPUTE) begin
-//         if (k_cnt <= 2 || k_cnt >= {1'b0, cfg_Tk_r} - 1)
-//             $display("[MXU-DBG] T=%0t COMPUTE k_cnt=%0d pe_en=%0b abuf[0][%0d]=%0d wbuf[%0d][0]=%0d",
-//                      $time, k_cnt, pe_en, k_cnt[6:0], abuf[0][k_cnt[6:0]], k_cnt[6:0], wbuf[k_cnt[6:0]][0]);
-//     end
-
-//     if (state == S_COMPUTE && k_cnt == {1'b0, cfg_Tk_r}) begin
-//         $display("[MXU-DBG] T=%0t MMA DONE acc[0][0]=%0d acc[0][1]=%0d acc[1][0]=%0d",
-//                  $time, pe_acc_out[0][0], pe_acc_out[0][1], pe_acc_out[1][0]);
-//     end
-
-//     if (op_valid && op_type == OP_MSTORE) begin
-//         $display("[MXU-DBG] T=%0t MSTORE flush_cnt=%0d data=%h acc[row][0..3]=%0d,%0d,%0d,%0d",
-//                  $time, flush_cnt, flush_data_comb,
-//                  pe_acc_out[flush_cnt[5:2]][0],
-//                  pe_acc_out[flush_cnt[5:2]][1],
-//                  pe_acc_out[flush_cnt[5:2]][2],
-//                  pe_acc_out[flush_cnt[5:2]][3]);
-//     end
-
-//     if (pe_acc_clear) begin
-//         $display("[MXU-DBG] T=%0t MZERO acc_clear asserted", $time);
-//     end
-// end
 
 endmodule

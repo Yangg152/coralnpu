@@ -75,7 +75,7 @@ void prep() {
 
 extern "C" {
 __attribute__((used, retain)) void run_ref() {
-  tflite::reference_integer_ops::ConvPerChannel(
+  coralnpu_v2::opt::litert_micro::ConvPerChannel(
       params, output_multiplier, output_shift, input_shape_, input_data,
       filter_shape_, filter_data, bias_shape_, bias_data, output_shape_,
       output_data);
