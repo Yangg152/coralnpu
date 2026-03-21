@@ -116,12 +116,6 @@ inline __attribute__((always_inline)) vint8m1_t QuantizeResult_m4(
     return acc_8;
 }
 
-// -----------------------------------------------------------------------------
-// 1x1 pointwise convolution via MXU
-// A-matrix = pixels (loaded once per pixel tile, stays in abuf)
-// W-matrix = filter weights (reloaded per oc_tile)
-// Works for both large and small spatial sizes
-// -----------------------------------------------------------------------------
 void Conv1x1PerChannel_MXU(
     const ConvParams& params, const int32_t* output_multiplier,
     const int32_t* output_shift,
@@ -267,12 +261,236 @@ void Conv1x1PerChannel_MXU(
     }
 }
 
+static void ConvFirstLayer_MXU(
+    const ConvParams& params, const int32_t* output_multiplier,
+    const int32_t* output_shift,
+    const RuntimeShape& input_shape, const int8_t* input_data,
+    const RuntimeShape& filter_shape, const int8_t* filter_data,
+    const RuntimeShape& bias_shape, const int32_t* bias_data,
+    const RuntimeShape& output_shape, int8_t* output_data)
+{
+    const int input_height  = input_shape.Dims(1);
+    const int input_width   = input_shape.Dims(2);
+    const int input_depth   = input_shape.Dims(3);
+    const int filter_height = filter_shape.Dims(1);
+    const int filter_width  = filter_shape.Dims(2);
+    const int output_height = output_shape.Dims(1);
+    const int output_width  = output_shape.Dims(2);
+    const int output_depth  = output_shape.Dims(3);
+
+    const int stride_h   = params.stride_height;
+    const int stride_w   = params.stride_width;
+    const int pad_h      = params.padding_values.height;
+    const int pad_w      = params.padding_values.width;
+
+    const int32_t input_offset  = params.input_offset;
+    const int32_t output_offset = params.output_offset;
+    const int32_t output_min    = params.quantized_activation_min;
+    const int32_t output_max    = params.quantized_activation_max;
+
+    const int K_raw = filter_height * filter_width * input_depth;
+    const int K_padded = ((K_raw + 15) / 16) * 16;
+    const int num_k_chunks = K_padded / 16;
+    const int input_row_stride = input_width * input_depth;
+
+    const int8_t pad_value = static_cast<int8_t>(-input_offset);
+
+    // =========================================================
+    // Shift params
+    // =========================================================
+    auto lshift_data = make_aligned_array<uint8_t>(16, output_depth);
+    auto rshift_data = make_aligned_array<uint8_t>(16, output_depth);
+    if (!lshift_data || !rshift_data) return;
+    PrepareShiftParams(lshift_data.get(), rshift_data.get(),
+                       output_shift, output_depth);
+
+    // =========================================================
+    // Repack weights: TFLite [oc][fh][fw][ic] -> MXU [k][16]
+    // =========================================================
+    int8_t wt_buf[256 * 16] __attribute__((aligned(16)));
+    std::memset(wt_buf, 0, K_padded * 16);
+    int32_t combined_bias_buf[16] __attribute__((aligned(16)));
+    std::memset(combined_bias_buf, 0, sizeof(combined_bias_buf));
+
+    for (int oc = 0; oc < output_depth; oc++) {
+        const int8_t* fp = filter_data + oc * K_raw;
+        int32_t fsum = 0;
+        for (int k = 0; k < K_raw; k++) {
+            wt_buf[k * 16 + oc] = fp[k];
+            fsum += (int32_t)fp[k];
+        }
+        combined_bias_buf[oc] = (bias_data ? bias_data[oc] : 0)
+                                + input_offset * fsum;
+    }
+
+    // =========================================================
+    // Buffers
+    // =========================================================
+    int8_t im2col[16 * 256] __attribute__((aligned(16)));
+    int32_t acc_buf[16 * 16] __attribute__((aligned(16)));
+
+    if (K_padded > K_raw) {
+        for (int r = 0; r < 16; r++)
+            std::memset(im2col + r * K_padded + K_raw, 0, K_padded - K_raw);
+    }
+
+    // =========================================================
+    // Configure MXU and load W once
+    // =========================================================
+    uint8_t tk_cfg = (K_padded == 256) ? 0 : (uint8_t)K_padded;
+    mxu_mcfg((uint32_t)tk_cfg | 0x100);
+
+    for (int k = 0; k < K_padded; k++)
+        mxu_mload_w_from_mem(wt_buf + k * 16, (k == K_padded - 1));
+
+    // =========================================================
+    // Preload quantization vectors (oc <= 16, fits in m4)
+    // =========================================================
+    const size_t oc_vl = __riscv_vsetvl_e32m4(output_depth);
+    vint32m4_t v_bias = __riscv_vle32_v_i32m4(combined_bias_buf, oc_vl);
+    vint32m4_t v_mult = __riscv_vle32_v_i32m4(output_multiplier, oc_vl);
+    vuint32m4_t v_ls = __riscv_vzext_vf4_u32m4(
+        __riscv_vle8_v_u8m1(lshift_data.get(), oc_vl), oc_vl);
+    vuint32m4_t v_rs = __riscv_vzext_vf4_u32m4(
+        __riscv_vle8_v_u8m1(rshift_data.get(), oc_vl), oc_vl);
+
+    // =========================================================
+    // Safe region boundaries
+    // =========================================================
+    const int oy_safe_start = (pad_h + stride_h - 1) / stride_h;
+    const int oy_safe_end   = (input_height + pad_h - filter_height + 1) / stride_h;
+    const int ox_safe_start = (pad_w + stride_w - 1) / stride_w;
+    const int ox_safe_end   = (input_width + pad_w - filter_width + 1) / stride_w;
+
+    int p_count = 0;
+    int p_base = 0;
+
+    const int tap_row_bytes = filter_width * input_depth;
+
+    // =========================================================
+    // flush_tile: load A, compute MMA, quantize & store
+    // =========================================================
+    auto flush_tile = [&]() {
+        // Zero unused rows — these should use pad_value for consistency,
+        // but since they're not real pixels and we won't read their output,
+        // 0 is fine (weights * 0 = 0, won't affect other rows in MXU).
+        for (int r = p_count; r < 16; r++)
+            std::memset(im2col + r * K_padded, 0, K_raw);
+
+        // Load A matrix
+        for (int row = 0; row < 16; row++)
+            for (int chunk = 0; chunk < num_k_chunks; chunk++)
+                mxu_mload_a_from_mem(
+                    im2col + row * K_padded + chunk * 16,
+                    (row == 15 && chunk == num_k_chunks - 1));
+
+        mxu_mzero();
+        mxu_mma();
+
+        // Store accumulator
+        for (int i = 0; i < 64; i++)
+            mxu_mstore_to_mem(&acc_buf[i * 4]);
+
+        // Quantize all valid pixels in this tile
+        for (int p = 0; p < p_count; p++) {
+            vint32m4_t acc = __riscv_vle32_v_i32m4(&acc_buf[p * 16], oc_vl);
+            acc = __riscv_vadd_vv_i32m4(acc, v_bias, oc_vl);
+            vint8m1_t out8 = QuantizeResult_m4(
+                acc, v_mult, v_ls, v_rs,
+                output_offset, output_min, output_max, oc_vl);
+            __riscv_vse8_v_i8m1(
+                output_data + (p_base + p) * output_depth,
+                out8, oc_vl);
+        }
+
+        p_base += p_count;
+        p_count = 0;
+    };
+
+    // =========================================================
+    // Fast im2col for interior pixels — no padding needed
+    // =========================================================
+    auto add_pixel_fast = [&](int iy_base, int ix_base) {
+        int8_t* col = im2col + p_count * K_padded;
+        const int8_t* base = input_data + iy_base * input_row_stride
+                             + ix_base * input_depth;
+
+        const size_t row_vl = __riscv_vsetvl_e8m1(tap_row_bytes);
+        for (int fh = 0; fh < filter_height; fh++) {
+            vint8m1_t row_data = __riscv_vle8_v_i8m1(
+                base + fh * input_row_stride, row_vl);
+            __riscv_vse8_v_i8m1(
+                col + fh * tap_row_bytes, row_data, row_vl);
+        }
+
+        p_count++;
+        if (p_count == 16) flush_tile();
+    };
+
+    // =========================================================
+    // Safe im2col for border pixels — fill with pad_value
+    // =========================================================
+    auto add_pixel_safe = [&](int oy, int ox) {
+        int8_t* col = im2col + p_count * K_padded;
+        // Fill data portion with pad_value (not 0!)
+        std::memset(col, pad_value, K_raw);
+
+        const int iy_base = oy * stride_h - pad_h;
+        const int ix_base = ox * stride_w - pad_w;
+
+        for (int fh = 0; fh < filter_height; fh++) {
+            const int iy = iy_base + fh;
+            if ((unsigned)iy >= (unsigned)input_height) continue;
+
+            const int8_t* in_row = input_data + iy * input_row_stride;
+            int8_t* col_row = col + fh * tap_row_bytes;
+
+            for (int fw = 0; fw < filter_width; fw++) {
+                const int ix = ix_base + fw;
+                if ((unsigned)ix >= (unsigned)input_width) continue;
+                const int8_t* src = in_row + ix * input_depth;
+                int8_t* dst = col_row + fw * input_depth;
+                for (int c = 0; c < input_depth; c++)
+                    dst[c] = src[c];
+            }
+        }
+
+        p_count++;
+        if (p_count == 16) flush_tile();
+    };
+
+    // =========================================================
+    // Main loop
+    // =========================================================
+    for (int oy = 0; oy < output_height; oy++) {
+        const int iy_base = oy * stride_h - pad_h;
+        const bool y_safe = (oy >= oy_safe_start && oy < oy_safe_end);
+
+        if (y_safe) {
+            for (int ox = 0; ox < ox_safe_start; ox++)
+                add_pixel_safe(oy, ox);
+
+            for (int ox = ox_safe_start; ox < ox_safe_end; ox++) {
+                const int ix_base = ox * stride_w - pad_w;
+                add_pixel_fast(iy_base, ix_base);
+            }
+
+            for (int ox = ox_safe_end; ox < output_width; ox++)
+                add_pixel_safe(oy, ox);
+        } else {
+            for (int ox = 0; ox < output_width; ox++)
+                add_pixel_safe(oy, ox);
+        }
+    }
+
+    if (p_count > 0) flush_tile();
+}
+
 } // anonymous namespace
 
 // =============================================================================
 // Public interface
 // =============================================================================
-
 void MxuConvPerChannel(
     const ConvParams& params, const int32_t* output_multiplier,
     const int32_t* output_shift,
@@ -285,12 +503,23 @@ void MxuConvPerChannel(
     const int filter_width  = filter_shape.Dims(2);
     const int input_depth   = input_shape.Dims(3);
 
-    const bool is_1x1    = (filter_height == 1 && filter_width == 1);
+    const int K_raw = filter_height * filter_width * input_depth;
+    const int K_padded = ((K_raw + 15) / 16) * 16;
+
+    const bool is_1x1     = (filter_height == 1 && filter_width == 1);
     const bool is_stride1 = (params.stride_width == 1 && params.stride_height == 1);
-    const bool depth_16  = (input_depth > 0) && (input_depth % 16 == 0);
+    const bool depth_16   = (input_depth > 0) && (input_depth % 16 == 0);
+
+    // MXU can handle K_padded up to 256
+    const bool mxu_feasible = (K_padded <= 256);
 
     if (is_1x1 && is_stride1 && depth_16) {
         Conv1x1PerChannel_MXU(
+            params, output_multiplier, output_shift,
+            input_shape, input_data, filter_shape, filter_data,
+            bias_shape, bias_data, output_shape, output_data);
+    } else if (mxu_feasible) {
+        ConvFirstLayer_MXU(
             params, output_multiplier, output_shift,
             input_shape, input_data, filter_shape, filter_data,
             bias_shape, bias_data, output_shape, output_data);

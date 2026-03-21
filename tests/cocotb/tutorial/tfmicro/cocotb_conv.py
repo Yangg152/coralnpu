@@ -266,6 +266,13 @@ class ConvTest:
 # ==============================================================================
 
 @cocotb.test()
+async def benchmark_mxu_vww_first_layer(dut):
+    """Benchmark: VWW 首层 3x3 conv, stride 2, RGB input"""
+    t = ConvTest(in_ch=3, out_ch=8, h=96, w=96, kernel_size=3, stride=2, padding=1)
+    await t.load_and_populate_input(dut)
+    await t.test(ref_target=40_000_000, opt_target=5_000_000, run_ref=False, check_python=True)
+
+@cocotb.test()
 async def test_mxu_exact_1_tile(dut):
     """【完美对齐】1个 16x16 Tile: Pixels=16, Out_C=16, In_C=16"""
     t = ConvTest(in_ch=16, out_ch=16, h=4, w=4, kernel_size=1)
