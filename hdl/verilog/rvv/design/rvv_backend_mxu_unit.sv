@@ -39,14 +39,15 @@ localparam [2:0]
     OP_MFENCE  = 3'd6;
 
 localparam [3:0]
-    S_IDLE    = 4'd0,
-    S_LOAD_W  = 4'd1,
-    S_LOAD_A  = 4'd2,
-    S_READY   = 4'd3,
-    S_COMPUTE = 4'd4,
-    S_COMP_RD = 4'd5,
-    S_FLUSH   = 4'd6,
-    S_FENCE   = 4'd7;
+    S_IDLE      = 4'd0,
+    S_LOAD_W    = 4'd1,
+    S_LOAD_A    = 4'd2,
+    S_READY     = 4'd3,
+    S_COMPUTE   = 4'd4,
+    S_COMP_RD   = 4'd5,
+    S_FLUSH     = 4'd6,
+    S_FENCE     = 4'd7,
+    S_LOAD_A_EX = 4'd8;  // MLOAD_A 展开写入状态
 
 reg [3:0]  state;
 reg [7:0]  cfg_Tk_r;
@@ -54,7 +55,7 @@ reg [8:0]  cfg_Tk_full;
 reg [7:0]  num_a_chunks_r;
 
 // ---------------------------------------------------------------
-// SRAM
+// Weight SRAM
 // ---------------------------------------------------------------
 reg          wbuf_en, wbuf_wr;
 reg  [7:0]   wbuf_addr;
@@ -71,7 +72,25 @@ Sram_256x128 u_wbuf (
     .rdata (wbuf_rdata)
 );
 
-reg signed [7:0] abuf [0:15][0:MAX_TK-1];
+// ---------------------------------------------------------------
+// Activation SRAM (转置存储)
+// 地址 k -> {abuf[15][k], ..., abuf[1][k], abuf[0][k]}
+// ---------------------------------------------------------------
+reg          abuf_en, abuf_wr;
+reg  [7:0]   abuf_addr;
+reg  [127:0] abuf_wdata;
+reg  [15:0]  abuf_wmask;
+wire [127:0] abuf_rdata;
+
+Sram_256x128 u_abuf (
+    .clock (clk),
+    .enable(abuf_en),
+    .write (abuf_wr),
+    .addr  (abuf_addr),
+    .wdata (abuf_wdata),
+    .wmask (abuf_wmask),
+    .rdata (abuf_rdata)
+);
 
 reg [7:0]  load_cnt;
 reg [3:0]  a_row;
@@ -79,59 +98,61 @@ reg [7:0]  a_chunk;
 reg [8:0]  k_cnt;
 reg [5:0]  flush_cnt;
 
-// ---------------------------------------------------------------
-// SRAM read pipeline
-//
-// Cycle N  : issue SRAM read (wbuf_en=1, wbuf_wr=0, addr=k_cnt)
-//            k_cnt advances to k_cnt+1
-// Cycle N+1: wbuf_rdata valid for addr issued at cycle N
-//            sram_rd_valid_p1 = 1
-//            k_cnt_p1 = k_cnt value from cycle N
-//            Use wbuf_rdata DIRECTLY (combinational) for weight
-//            Use abuf[row][k_cnt_p1] for activation
-//            PE multiply stage captures act*weight
-// Cycle N+2: PE accumulate stage adds product to acc
-// ---------------------------------------------------------------
+// MLOAD_A 展开写入相关
+reg [127:0] a_beat_buf;       // 缓存当前 beat 的 128bit 数据
+reg [3:0]   a_expand_cnt;     // 展开计数 0..15
+reg         a_beat_is_last;   // 当前 beat 是否是最后一拍
+reg [3:0]   a_row_saved;      // 展开期间保存的 row
+reg [7:0]   a_chunk_saved;    // 展开期间保存的 chunk
 
-// sram_rd_valid_p1: 1 cycle after read was issued
-reg        sram_rd_valid_p1;
-reg [8:0]  k_cnt_p1;  // k_cnt captured at read issue time, delayed 1 cycle
+// ---------------------------------------------------------------
+// SRAM read pipeline (1 cycle latency)
+// ---------------------------------------------------------------
+wire sram_rd_now_w = (wbuf_en && !wbuf_wr);
+wire sram_rd_now_a = (abuf_en && !abuf_wr);
 
-wire sram_rd_now = (wbuf_en && !wbuf_wr);
+reg        w_rd_valid_p1;
+reg        a_rd_valid_p1;
+reg [8:0]  k_cnt_p1;
 
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-        sram_rd_valid_p1 <= 1'b0;
-        k_cnt_p1         <= 9'd0;
+        w_rd_valid_p1 <= 1'b0;
+        a_rd_valid_p1 <= 1'b0;
+        k_cnt_p1      <= 9'd0;
     end else begin
-        sram_rd_valid_p1 <= sram_rd_now;
-        k_cnt_p1         <= k_cnt;
+        w_rd_valid_p1 <= sram_rd_now_w;
+        a_rd_valid_p1 <= sram_rd_now_a;
+        k_cnt_p1      <= k_cnt;
     end
 end
+
+// 两个 SRAM 同时读，都在 1 拍后有效
+// PE enable: 两者都有效时才使能
+wire pe_data_valid = w_rd_valid_p1 & a_rd_valid_p1;
 
 assign act_ready = (state == S_LOAD_A);
 
 // ---------------------------------------------------------------
-// PE weight input: use wbuf_rdata DIRECTLY when sram_rd_valid_p1
-// (rdata is valid combinationally at this cycle)
+// PE weight input: 直接从 wbuf_rdata 组合取
 // ---------------------------------------------------------------
 wire signed [7:0] pe_weight_in [0:15];
+genvar gi;
 generate
-    genvar gi;
     for (gi = 0; gi < 16; gi = gi + 1) begin : g_wt
         assign pe_weight_in[gi] = $signed(wbuf_rdata[gi*8 +: 8]);
     end
 endgenerate
 
 // ---------------------------------------------------------------
-// PE act input: use k_cnt_p1 (the k that was read last cycle)
+// PE act input: 直接从 abuf_rdata 组合取
+// abuf_rdata[row*8 +: 8] = abuf[row][k]
 // ---------------------------------------------------------------
 wire signed [7:0] pe_act_in [0:15];
-
 genvar gm, gn;
 generate
     for (gm = 0; gm < 16; gm = gm + 1) begin : g_act
-        assign pe_act_in[gm] = abuf[gm][k_cnt_p1[7:0]];
+        assign pe_act_in[gm] = $signed(abuf_rdata[gm*8 +: 8]);
     end
 endgenerate
 
@@ -144,7 +165,7 @@ wire signed [31:0] pe_acc_out [0:15][0:15];
 
 assign pe_acc_clear = (op_valid && op_type == OP_MZERO &&
                        (state == S_IDLE || state == S_READY));
-assign pe_en        = sram_rd_valid_p1;
+assign pe_en        = pe_data_valid;
 
 generate
     for (gm = 0; gm < 16; gm = gm + 1) begin : g_pe_m
@@ -190,24 +211,38 @@ always @(*) begin
 end
 
 // ---------------------------------------------------------------
-// Helper tasks
+// abuf SRAM 组合控制
 // ---------------------------------------------------------------
-task automatic advance_a_counters;
-    if (a_chunk == num_a_chunks_r - 8'd1) begin
-        a_chunk <= 8'd0;
-        a_row   <= a_row + 4'd1;
-    end else begin
-        a_chunk <= a_chunk + 8'd1;
+always @(*) begin
+    abuf_en    = 1'b0;
+    abuf_wr    = 1'b0;
+    abuf_addr  = 8'd0;
+    abuf_wdata = 128'd0;
+    abuf_wmask = 16'h0000;
+
+    case (state)
+    S_LOAD_A_EX: begin
+        // 展开写入：每周期写 1 个 SRAM 地址，只更新第 a_row_saved 个 byte
+        abuf_en    = 1'b1;
+        abuf_wr    = 1'b1;
+        abuf_addr  = (a_chunk_saved << 4) | {4'd0, a_expand_cnt};
+        // 把当前 byte 复制到 wdata 的第 a_row_saved 个 byte 位置
+        abuf_wdata = {16{a_beat_buf[a_expand_cnt*8 +: 8]}};
+        abuf_wmask = 16'd1 << a_row_saved;
     end
-endtask
-
-task automatic write_abuf_beat;
-    for (j = 0; j < 16; j = j + 1)
-        abuf[a_row][(a_chunk << 4) + j] <= $signed(act_vec[j*8 +: 8]);
-endtask
+    S_COMPUTE: begin
+        if (k_cnt < cfg_Tk_full) begin
+            abuf_en   = 1'b1;
+            abuf_wr   = 1'b0;
+            abuf_addr = k_cnt[7:0];
+        end
+    end
+    default: ;
+    endcase
+end
 
 // ---------------------------------------------------------------
-// SRAM combinational control
+// wbuf SRAM 组合控制
 // ---------------------------------------------------------------
 always @(*) begin
     wbuf_en    = 1'b0;
@@ -244,7 +279,7 @@ always @(*) begin
 end
 
 // ---------------------------------------------------------------
-// Main FSM
+// 主状态机
 // ---------------------------------------------------------------
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -263,6 +298,11 @@ always @(posedge clk or negedge rst_n) begin
         cfg_Tk_r        <= 8'd64;
         cfg_Tk_full     <= 9'd64;
         result_data     <= 128'd0;
+        a_beat_buf      <= 128'd0;
+        a_expand_cnt    <= 4'd0;
+        a_beat_is_last  <= 1'b0;
+        a_row_saved     <= 4'd0;
+        a_chunk_saved   <= 8'd0;
     end else begin
         op_done      <= 1'b0;
         mfence_done  <= 1'b0;
@@ -301,17 +341,14 @@ always @(posedge clk or negedge rst_n) begin
                 end
 
                 OP_MLOAD_A: begin
-                    write_abuf_beat;
-                    if (uop_last) begin
-                        op_done  <= 1'b1;
-                        op_ready <= 1'b1;
-                        a_row    <= 4'd0;
-                        a_chunk  <= 8'd0;
-                    end else begin
-                        advance_a_counters;
-                        op_ready <= 1'b0;
-                        state    <= S_LOAD_A;
-                    end
+                    // 缓存 beat 数据，进入展开写入状态
+                    a_beat_buf     <= act_vec;
+                    a_row_saved    <= a_row;
+                    a_chunk_saved  <= a_chunk;
+                    a_beat_is_last <= uop_last;
+                    a_expand_cnt   <= 4'd0;
+                    op_ready       <= 1'b0;
+                    state          <= S_LOAD_A_EX;
                 end
 
                 OP_MMA: begin
@@ -338,6 +375,52 @@ always @(posedge clk or negedge rst_n) begin
             end
         end
 
+        // -------------------------------------------------------
+        // MLOAD_A 展开写入：16 周期把 1 个 beat 写入 abuf SRAM
+        // -------------------------------------------------------
+        S_LOAD_A_EX: begin
+            result_valid <= 1'b0;
+            if (a_expand_cnt == 4'd15) begin
+                // 16 个字节全部写完
+                if (a_beat_is_last) begin
+                    // 整个 MLOAD_A 指令结束
+                    op_done  <= 1'b1;
+                    op_ready <= 1'b1;
+                    a_row    <= 4'd0;
+                    a_chunk  <= 8'd0;
+                    state    <= S_READY;
+                end else begin
+                    // 推进 row/chunk 计数器，回到 S_LOAD_A 等下一个 beat
+                    if (a_chunk == num_a_chunks_r - 8'd1) begin
+                        a_chunk <= 8'd0;
+                        a_row   <= a_row + 4'd1;
+                    end else begin
+                        a_chunk <= a_chunk + 8'd1;
+                    end
+                    op_ready <= 1'b0;
+                    state    <= S_LOAD_A;
+                end
+            end else begin
+                a_expand_cnt <= a_expand_cnt + 4'd1;
+            end
+        end
+
+        // -------------------------------------------------------
+        // S_LOAD_A: 等待下一个 act beat
+        // -------------------------------------------------------
+        S_LOAD_A: begin
+            result_valid <= 1'b0;
+            if (act_valid) begin
+                // 缓存并进入展开
+                a_beat_buf     <= act_vec;
+                a_row_saved    <= a_row;
+                a_chunk_saved  <= a_chunk;
+                a_beat_is_last <= uop_last;
+                a_expand_cnt   <= 4'd0;
+                state          <= S_LOAD_A_EX;
+            end
+        end
+
         S_LOAD_W: begin
             result_valid <= 1'b0;
             if (weight_valid) begin
@@ -353,43 +436,19 @@ always @(posedge clk or negedge rst_n) begin
             end
         end
 
-        S_LOAD_A: begin
-            result_valid <= 1'b0;
-            if (act_valid) begin
-                write_abuf_beat;
-                if (uop_last) begin
-                    op_done  <= 1'b1;
-                    op_ready <= 1'b1;
-                    a_row    <= 4'd0;
-                    a_chunk  <= 8'd0;
-                    state    <= S_READY;
-                end else begin
-                    advance_a_counters;
-                end
-            end
-        end
-
         S_COMPUTE: begin
             result_valid <= 1'b0;
             if (k_cnt < cfg_Tk_full) begin
                 k_cnt <= k_cnt + 9'd1;
             end else begin
-                // Wait for last PE accumulate to complete
-                // sram_rd_valid_p1 drains 1 cycle after last read
-                // PE has 2 internal stages (mul_reg + acc), so need
-                // to wait for sram_rd_valid_p1 to go low, then 1 more
-                // cycle for the PE accumulate stage.
-                if (!sram_rd_valid_p1) begin
-                    // PE multiply stage has consumed last data.
-                    // Move to COMP_RD to wait 1 more cycle for
-                    // PE accumulate to finish.
+                if (!pe_data_valid) begin
                     state <= S_COMP_RD;
                 end
             end
         end
 
         S_COMP_RD: begin
-            // One extra cycle for PE stage 2 (accumulate) to complete
+            // 等 PE 第二级（累加）完成
             op_done  <= 1'b1;
             op_ready <= 1'b1;
             state    <= S_READY;
