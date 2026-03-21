@@ -17,6 +17,7 @@ load("//rules:vcs.bzl", "vcs_testbench_test")
 
 exports_files(
     srcs = [
+        "Sram_256x128.v",
         "rvv_backend.sv",
         "rvv_backend_alu.sv",
         "rvv_backend_alu_unit.sv",

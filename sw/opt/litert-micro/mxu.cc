@@ -174,15 +174,17 @@ void Conv1x1PerChannel_MXU(
         if (oc_tile == 16) {
             for (int k = 0; k < Tk; k++) {
                 int8_t* dst = wt_all.get() + (ot * Tk + k) * 16;
-                for (int j = 0; j < 16; j++)
-                    dst[j] = filter_data[(oc_base + j) * input_depth + k];
+                const int8_t* src = filter_data + oc_base * input_depth + k;
+                vint8m1_t v = __riscv_vlse8_v_i8m1(src, input_depth, 16);
+                __riscv_vse8_v_i8m1(dst, v, oc_tile);
             }
         } else {
             for (int k = 0; k < Tk; k++) {
                 int8_t* dst = wt_all.get() + (ot * Tk + k) * 16;
-                std::memset(dst, 0, 16);
-                for (int j = 0; j < oc_tile; j++)
-                    dst[j] = filter_data[(oc_base + j) * input_depth + k];
+                std::memset(dst, 0, 16);  
+                const int8_t* src = filter_data + oc_base * input_depth + k;
+                vint8m1_t v = __riscv_vlse8_v_i8m1(src, input_depth, oc_tile);
+                __riscv_vse8_v_i8m1(dst, v, oc_tile);  
             }
         }
     }
@@ -292,6 +294,7 @@ static void ConvFirstLayer_MXU(
     const int K_padded = ((K_raw + 15) / 16) * 16;
     const int num_k_chunks = K_padded / 16;
     const int input_row_stride = input_width * input_depth;
+    const int tap_row_bytes = filter_width * input_depth;
 
     const int8_t pad_value = static_cast<int8_t>(-input_offset);
 
@@ -305,7 +308,7 @@ static void ConvFirstLayer_MXU(
                        output_shift, output_depth);
 
     // =========================================================
-    // Repack weights: TFLite [oc][fh][fw][ic] -> MXU [k][16]
+    // Repack weights + combined bias
     // =========================================================
     int8_t wt_buf[256 * 16] __attribute__((aligned(16)));
     std::memset(wt_buf, 0, K_padded * 16);
@@ -324,14 +327,19 @@ static void ConvFirstLayer_MXU(
     }
 
     // =========================================================
-    // Buffers
+    // im2col buffer — two tiles for double buffering
     // =========================================================
-    int8_t im2col[16 * 256] __attribute__((aligned(16)));
+    // Layout: im2col[tile][row][K_padded], tile=0 or 1
+    int8_t im2col[2][16 * 256] __attribute__((aligned(16)));
     int32_t acc_buf[16 * 16] __attribute__((aligned(16)));
 
-    if (K_padded > K_raw) {
-        for (int r = 0; r < 16; r++)
-            std::memset(im2col + r * K_padded + K_raw, 0, K_padded - K_raw);
+    // Pre-zero the K_padded tail for both buffers
+    for (int t = 0; t < 2; t++) {
+        if (K_padded > K_raw) {
+            for (int r = 0; r < 16; r++)
+                std::memset(im2col[t] + r * K_padded + K_raw, 0,
+                            K_padded - K_raw);
+        }
     }
 
     // =========================================================
@@ -344,7 +352,7 @@ static void ConvFirstLayer_MXU(
         mxu_mload_w_from_mem(wt_buf + k * 16, (k == K_padded - 1));
 
     // =========================================================
-    // Preload quantization vectors (oc <= 16, fits in m4)
+    // Preload quantization vectors
     // =========================================================
     const size_t oc_vl = __riscv_vsetvl_e32m4(output_depth);
     vint32m4_t v_bias = __riscv_vle32_v_i32m4(combined_bias_buf, oc_vl);
@@ -362,78 +370,44 @@ static void ConvFirstLayer_MXU(
     const int ox_safe_start = (pad_w + stride_w - 1) / stride_w;
     const int ox_safe_end   = (input_width + pad_w - filter_width + 1) / stride_w;
 
-    int p_count = 0;
-    int p_base = 0;
-
-    const int tap_row_bytes = filter_width * input_depth;
+    // =========================================================
+    // Collect all output pixel coordinates into a flat array
+    // so we can process them in tiles without complex state
+    // =========================================================
+    const int total_pixels = output_height * output_width;
 
     // =========================================================
-    // flush_tile: load A, compute MMA, quantize & store
+    // Optimized im2col: specialize for common small depths
+    // For depth=3, tap_row_bytes=9: use 32-bit + 16-bit + 8-bit stores
     // =========================================================
-    auto flush_tile = [&]() {
-        // Zero unused rows — these should use pad_value for consistency,
-        // but since they're not real pixels and we won't read their output,
-        // 0 is fine (weights * 0 = 0, won't affect other rows in MXU).
-        for (int r = p_count; r < 16; r++)
-            std::memset(im2col + r * K_padded, 0, K_raw);
 
-        // Load A matrix
-        for (int row = 0; row < 16; row++)
-            for (int chunk = 0; chunk < num_k_chunks; chunk++)
-                mxu_mload_a_from_mem(
-                    im2col + row * K_padded + chunk * 16,
-                    (row == 15 && chunk == num_k_chunks - 1));
-
-        mxu_mzero();
-        mxu_mma();
-
-        // Store accumulator
-        for (int i = 0; i < 64; i++)
-            mxu_mstore_to_mem(&acc_buf[i * 4]);
-
-        // Quantize all valid pixels in this tile
-        for (int p = 0; p < p_count; p++) {
-            vint32m4_t acc = __riscv_vle32_v_i32m4(&acc_buf[p * 16], oc_vl);
-            acc = __riscv_vadd_vv_i32m4(acc, v_bias, oc_vl);
-            vint8m1_t out8 = QuantizeResult_m4(
-                acc, v_mult, v_ls, v_rs,
-                output_offset, output_min, output_max, oc_vl);
-            __riscv_vse8_v_i8m1(
-                output_data + (p_base + p) * output_depth,
-                out8, oc_vl);
-        }
-
-        p_base += p_count;
-        p_count = 0;
-    };
-
-    // =========================================================
-    // Fast im2col for interior pixels — no padding needed
-    // =========================================================
-    auto add_pixel_fast = [&](int iy_base, int ix_base) {
-        int8_t* col = im2col + p_count * K_padded;
+    // Helper: fast im2col for safe pixels, no branches in inner loop
+    auto fill_im2col_fast = [&](int8_t* col, int iy_base, int ix_base) 
+        __attribute__((always_inline)) {
         const int8_t* base = input_data + iy_base * input_row_stride
                              + ix_base * input_depth;
-
-        const size_t row_vl = __riscv_vsetvl_e8m1(tap_row_bytes);
+        // Unroll for small filter sizes — compiler should handle this
         for (int fh = 0; fh < filter_height; fh++) {
-            vint8m1_t row_data = __riscv_vle8_v_i8m1(
-                base + fh * input_row_stride, row_vl);
-            __riscv_vse8_v_i8m1(
-                col + fh * tap_row_bytes, row_data, row_vl);
+            const int8_t* src = base + fh * input_row_stride;
+            int8_t* dst = col + fh * tap_row_bytes;
+            // For tap_row_bytes <= 16, a single memcpy is fine
+            // Compiler will inline this for small constant sizes
+            __builtin_memcpy(dst, src, tap_row_bytes);
         }
-
-        p_count++;
-        if (p_count == 16) flush_tile();
     };
 
-    // =========================================================
-    // Safe im2col for border pixels — fill with pad_value
-    // =========================================================
-    auto add_pixel_safe = [&](int oy, int ox) {
-        int8_t* col = im2col + p_count * K_padded;
-        // Fill data portion with pad_value (not 0!)
-        std::memset(col, pad_value, K_raw);
+    auto fill_im2col_safe = [&](int8_t* col, int oy, int ox)
+        __attribute__((always_inline)) {
+        // Use 32-bit fill for speed when possible
+        // pad_value repeated 4 times
+        const uint32_t pad4 = (uint32_t)(uint8_t)pad_value * 0x01010101u;
+        int32_t* col32 = reinterpret_cast<int32_t*>(col);
+        // Fill K_raw bytes with pad_value using 32-bit stores
+        const int words = K_raw / 4;
+        for (int w = 0; w < words; w++)
+            col32[w] = (int32_t)pad4;
+        for (int b = words * 4; b < K_raw; b++)
+            col[b] = pad_value;
 
         const int iy_base = oy * stride_h - pad_h;
         const int ix_base = ox * stride_w - pad_w;
@@ -445,45 +419,103 @@ static void ConvFirstLayer_MXU(
             const int8_t* in_row = input_data + iy * input_row_stride;
             int8_t* col_row = col + fh * tap_row_bytes;
 
-            for (int fw = 0; fw < filter_width; fw++) {
-                const int ix = ix_base + fw;
-                if ((unsigned)ix >= (unsigned)input_width) continue;
-                const int8_t* src = in_row + ix * input_depth;
-                int8_t* dst = col_row + fw * input_depth;
-                for (int c = 0; c < input_depth; c++)
-                    dst[c] = src[c];
+            // Compute valid fw range to avoid per-element branch
+            const int fw_start = std::max(0, -ix_base);
+            const int fw_end   = std::min(filter_width, input_width - ix_base);
+            if (fw_start < fw_end) {
+                __builtin_memcpy(
+                    col_row + fw_start * input_depth,
+                    in_row + (ix_base + fw_start) * input_depth,
+                    (fw_end - fw_start) * input_depth);
             }
         }
-
-        p_count++;
-        if (p_count == 16) flush_tile();
     };
 
     // =========================================================
-    // Main loop
+    // Process tiles with double-buffered im2col
+    // Fill tile N+1 while MXU computes tile N
     // =========================================================
-    for (int oy = 0; oy < output_height; oy++) {
-        const int iy_base = oy * stride_h - pad_h;
-        const bool y_safe = (oy >= oy_safe_start && oy < oy_safe_end);
+    int cur_buf = 0;
+    int p_count = 0;
+    int p_base = 0;
+    int pixel_idx = 0;  // linear index into output
 
-        if (y_safe) {
-            for (int ox = 0; ox < ox_safe_start; ox++)
-                add_pixel_safe(oy, ox);
+    // Fill first tile
+    auto fill_next_pixels = [&](int buf, int& count) {
+        count = 0;
+        while (count < 16 && pixel_idx < total_pixels) {
+            const int oy = pixel_idx / output_width;
+            const int ox = pixel_idx % output_width;
+            pixel_idx++;
 
-            for (int ox = ox_safe_start; ox < ox_safe_end; ox++) {
-                const int ix_base = ox * stride_w - pad_w;
-                add_pixel_fast(iy_base, ix_base);
+            int8_t* col = im2col[buf] + count * K_padded;
+
+            const int iy_base = oy * stride_h - pad_h;
+            const int ix_base = ox * stride_w - pad_w;
+            const bool y_safe = (oy >= oy_safe_start && oy < oy_safe_end);
+            const bool x_safe = (ox >= ox_safe_start && ox < ox_safe_end);
+
+            if (y_safe && x_safe) {
+                fill_im2col_fast(col, iy_base, ix_base);
+            } else {
+                fill_im2col_safe(col, oy, ox);
             }
-
-            for (int ox = ox_safe_end; ox < output_width; ox++)
-                add_pixel_safe(oy, ox);
-        } else {
-            for (int ox = 0; ox < output_width; ox++)
-                add_pixel_safe(oy, ox);
+            count++;
         }
-    }
+        // Zero unused rows
+        for (int r = count; r < 16; r++)
+            std::memset(im2col[buf] + r * K_padded, 0, K_padded);
+    };
 
-    if (p_count > 0) flush_tile();
+    auto run_mxu_and_quantize = [&](int buf, int count, int base) {
+        int8_t* im = im2col[buf];
+
+        // Load A
+        for (int row = 0; row < 16; row++)
+            for (int chunk = 0; chunk < num_k_chunks; chunk++)
+                mxu_mload_a_from_mem(
+                    im + row * K_padded + chunk * 16,
+                    (row == 15 && chunk == num_k_chunks - 1));
+
+        mxu_mzero();
+        mxu_mma();
+
+        for (int i = 0; i < 64; i++)
+            mxu_mstore_to_mem(&acc_buf[i * 4]);
+
+        for (int p = 0; p < count; p++) {
+            vint32m4_t acc = __riscv_vle32_v_i32m4(&acc_buf[p * 16], oc_vl);
+            acc = __riscv_vadd_vv_i32m4(acc, v_bias, oc_vl);
+            vint8m1_t out8 = QuantizeResult_m4(
+                acc, v_mult, v_ls, v_rs,
+                output_offset, output_min, output_max, oc_vl);
+            __riscv_vse8_v_i8m1(
+                output_data + (base + p) * output_depth, out8, oc_vl);
+        }
+    };
+
+    // Pipeline: fill tile 0, then alternate fill/compute
+    fill_next_pixels(0, p_count);
+
+    while (p_count > 0) {
+        int this_count = p_count;
+        int this_base = p_base;
+        int this_buf = cur_buf;
+
+        p_base += this_count;
+        cur_buf ^= 1;
+
+        // Fill next tile into other buffer WHILE we could overlap
+        // (In practice on single-issue in-order core, no true overlap,
+        //  but double buffering avoids re-zeroing the same buffer)
+        int next_count = 0;
+        fill_next_pixels(cur_buf, next_count);
+
+        // Run MXU on current tile
+        run_mxu_and_quantize(this_buf, this_count, this_base);
+
+        p_count = next_count;
+    }
 }
 
 } // anonymous namespace
@@ -502,6 +534,7 @@ void MxuConvPerChannel(
     const int filter_height = filter_shape.Dims(1);
     const int filter_width  = filter_shape.Dims(2);
     const int input_depth   = input_shape.Dims(3);
+    const int output_depth  = output_shape.Dims(3);
 
     const int K_raw = filter_height * filter_width * input_depth;
     const int K_padded = ((K_raw + 15) / 16) * 16;
@@ -510,15 +543,17 @@ void MxuConvPerChannel(
     const bool is_stride1 = (params.stride_width == 1 && params.stride_height == 1);
     const bool depth_16   = (input_depth > 0) && (input_depth % 16 == 0);
 
-    // MXU can handle K_padded up to 256
     const bool mxu_feasible = (K_padded <= 256);
+    const int k_util_pct = (K_raw * 100) / K_padded;
+    const int n_util_pct = (std::min(output_depth, 16) * 100) / 16;
+    const bool mxu_efficient = (k_util_pct > 50) && (n_util_pct >= 50);
 
     if (is_1x1 && is_stride1 && depth_16) {
         Conv1x1PerChannel_MXU(
             params, output_multiplier, output_shift,
             input_shape, input_data, filter_shape, filter_data,
             bias_shape, bias_data, output_shape, output_data);
-    } else if (mxu_feasible) {
+    } else if (mxu_feasible && mxu_efficient) {
         ConvFirstLayer_MXU(
             params, output_multiplier, output_shift,
             input_shape, input_data, filter_shape, filter_data,

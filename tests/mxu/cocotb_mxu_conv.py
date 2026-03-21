@@ -623,12 +623,19 @@ async def test_mxu_exact_1_tile(dut):
 #     await t.load_and_populate_input(dut)
 #     await t.test(ref_target=500_000, opt_target=200_000, run_ref=True, check_python=True)
 
+@cocotb.test()
+async def benchmark_mxu_mobilenet_v1_pw1(dut):
+    """Benchmark: MobileNetV1 第一个 Pointwise Conv (1x1)"""
+    t = ConvTest(in_ch=16, out_ch=32, h=32, w=32, kernel_size=1)
+    await t.load_and_populate_input(dut)
+    await t.test(ref_target=80_000_000, opt_target=5_000_000, run_ref=False, check_python=True)
+
 # @cocotb.test()
-# async def benchmark_mxu_mobilenet_v1_pw1(dut):
-#     """Benchmark: MobileNetV1 第一个 Pointwise Conv (1x1)"""
-#     t = ConvTest(in_ch=16, out_ch=32, h=32, w=32, kernel_size=1)
+# async def benchmark_mxu_1x1_8to16(dut):
+#     """Benchmark: 1x1 conv, 8->16 channels, stride 1"""
+#     t = ConvTest(in_ch=8, out_ch=16, h=48, w=48, kernel_size=1, stride=1, padding=0)
 #     await t.load_and_populate_input(dut)
-#     await t.test(ref_target=80_000_000, opt_target=5_000_000, run_ref=False, check_python=True)
+#     await t.test(ref_target=40_000_000, opt_target=2_000_000, run_ref=False, check_python=True)
 
 @cocotb.test()
 async def benchmark_mxu_vww_first_layer(dut):

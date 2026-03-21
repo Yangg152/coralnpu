@@ -456,6 +456,7 @@ class RvvCoreWrapper(p: Parameters) extends BlackBox with HasBlackBoxInline
   addResource("hdl/verilog/rvv/common/edff.sv")
   addResource("hdl/verilog/rvv/common/edff_2d.sv")
   addResource("hdl/verilog/rvv/common/multi_fifo.sv")
+  addResource("hdl/verilog/rvv/design/Sram_256x128.v")
   addResource("hdl/verilog/rvv/design/Aligner.sv")
   addResource("hdl/verilog/rvv/design/RvvFrontEnd.sv")
   addResource("hdl/verilog/rvv/design/rvv_backend_alu_unit_addsub.sv")
