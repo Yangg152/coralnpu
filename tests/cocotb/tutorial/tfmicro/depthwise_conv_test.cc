@@ -148,13 +148,11 @@ __attribute__((used, retain)) void run_ref() {
 
 // Simple scratch buffer for testing
 // Moving to .extdata to avoid overflowing DTCM
-static int32_t scratch_buf[32768] __attribute__((section(".extdata"), aligned(16)));
-
 __attribute__((used, retain)) void run_optimized() {
   coralnpu_v2::opt::litert_micro::DepthwiseConvPerChannel(
       params, output_multiplier, output_shift, input_shape_, input_data,
       filter_shape_, filter_data, bias_shape_, bias_data, output_shape_,
-      output_data, scratch_buf);
+      output_data);
 }
 }
 

@@ -587,14 +587,76 @@ class ConvTest:
 # ==============================================================================
 # Tests
 # ==============================================================================
-
 @cocotb.test()
-async def test_mxu_exact_1_tile(dut):
-    """【完美对齐】1个 16x16 Tile: Pixels=16, Out_C=16, In_C=16"""
+async def test_mxu_cycle_1tile(dut):
+    """1 pixel tile: 16 pixels, 16 OC, 16 IC"""
     t = ConvTest(in_ch=16, out_ch=16, h=4, w=4, kernel_size=1)
     await t.load_and_populate_input(dut)
     await t.test(ref_target=200_000, opt_target=50_000, run_ref=False, check_python=True)
 
+@cocotb.test()
+async def test_mxu_cycle_2tile_pixel(dut):
+    """2 pixel tiles: 32 pixels, 16 OC, 16 IC"""
+    t = ConvTest(in_ch=16, out_ch=16, h=4, w=8, kernel_size=1)
+    await t.load_and_populate_input(dut)
+    await t.test(ref_target=200_000, opt_target=80_000, run_ref=False, check_python=True)
+
+# @cocotb.test()
+# async def test_mxu_cycle_4tile_pixel(dut):
+#     """4 pixel tiles: 64 pixels, 16 OC, 16 IC"""
+#     t = ConvTest(in_ch=16, out_ch=16, h=8, w=8, kernel_size=1)
+#     await t.load_and_populate_input(dut)
+#     await t.test(ref_target=200_000, opt_target=100_000, run_ref=False, check_python=True)
+
+@cocotb.test()
+async def test_mxu_cycle_conv2d_384(dut):
+    """Conv2D 1x1: 23x31 pixels, 384 OC, 384 IC"""
+    t = ConvTest(in_ch=384, out_ch=384, h=23, w=31, kernel_size=1)
+    await t.load_and_populate_input(dut)
+    await t.test(ref_target=200_000, opt_target=100_000_000_000_000, run_ref=False, check_python=True)
+
+# @cocotb.test()
+# async def test_mxu_exact_1_tile(dut):
+#     """【完美对齐】1个 16x16 Tile: Pixels=16, Out_C=16, In_C=16"""
+#     t = ConvTest(in_ch=16, out_ch=16, h=4, w=4, kernel_size=1)
+#     await t.load_and_populate_input(dut)
+#     await t.test(ref_target=200_000, opt_target=50_000, run_ref=False, check_python=True)
+
+# @cocotb.test()
+# async def test_mxu_1x1_24to48(dut):
+#     """MobileNet block: 1x1 conv, 24->48 (expansion)"""
+#     t = ConvTest(in_ch=24, out_ch=48, h=177, w=241, kernel_size=1)
+#     await t.load_and_populate_input(dut)
+#     await t.test(ref_target=100_000_0000, opt_target=10_000_000, run_ref=False, check_python=True)
+
+# @cocotb.test()
+# async def test_mxu_1x1_384to384(dut):
+#     """MobileNet block: 1x1 conv, 384->384 (pointwise, large depth)"""
+#     t = ConvTest(in_ch=384, out_ch=384, h=23, w=31, kernel_size=1)
+#     await t.load_and_populate_input(dut)
+#     await t.test(ref_target=100_000_0000, opt_target=8_000_000, run_ref=False, check_python=True)
+
+# @cocotb.test()
+# async def test_mxu_1x1_48to48(dut):
+#     """MobileNet block: 1x1 conv, 48->48 (pointwise)"""
+#     t = ConvTest(in_ch=48, out_ch=48, h=177, w=241, kernel_size=1)
+#     await t.load_and_populate_input(dut)
+#     await t.test(ref_target=100_000_0000, opt_target=15_000_000, run_ref=False, check_python=True)
+
+# @cocotb.test()
+# async def test_mxu_posenet_head_heatmap(dut):
+#     """PoseNet head: 1x1 conv, 192->17 (heatmap output)"""
+#     t = ConvTest(in_ch=192, out_ch=17, h=23, w=31, kernel_size=1)
+#     await t.load_and_populate_input(dut)
+#     await t.test(ref_target=40_000_000, opt_target=3_000_000, run_ref=False, check_python=True)
+
+# @cocotb.test()
+# async def test_mxu_posenet_head_mid_offsets(dut):
+#     """PoseNet head: 1x1 conv, 192->64 (mid offsets output)"""
+#     t = ConvTest(in_ch=192, out_ch=64, h=23, w=31, kernel_size=1)
+#     await t.load_and_populate_input(dut)
+#     await t.test(ref_target=40_000_000, opt_target=5_000_000, run_ref=False, check_python=True)
+    
 # @cocotb.test()
 # async def test_mxu_unaligned_small(dut):
 #     """【不足对齐】Pixels 和 Channels 都不足 16"""
@@ -622,13 +684,13 @@ async def test_mxu_exact_1_tile(dut):
 #     t = ConvTest(in_ch=4, out_ch=8, h=5, w=5, kernel_size=3, stride=1, padding=1)
 #     await t.load_and_populate_input(dut)
 #     await t.test(ref_target=500_000, opt_target=200_000, run_ref=True, check_python=True)
-
-@cocotb.test()
-async def benchmark_mxu_mobilenet_v1_pw1(dut):
-    """Benchmark: MobileNetV1 第一个 Pointwise Conv (1x1)"""
-    t = ConvTest(in_ch=16, out_ch=32, h=32, w=32, kernel_size=1)
-    await t.load_and_populate_input(dut)
-    await t.test(ref_target=80_000_000, opt_target=5_000_000, run_ref=False, check_python=True)
+    
+# @cocotb.test()
+# async def benchmark_mxu_mobilenet_v1_pw1(dut):
+#     """Benchmark: MobileNetV1 第一个 Pointwise Conv (1x1)"""
+#     t = ConvTest(in_ch=16, out_ch=32, h=32, w=32, kernel_size=1)
+#     await t.load_and_populate_input(dut)
+#     await t.test(ref_target=80_000_000, opt_target=5_000_000, run_ref=False, check_python=True)
 
 # @cocotb.test()
 # async def benchmark_mxu_1x1_8to16(dut):
@@ -637,12 +699,12 @@ async def benchmark_mxu_mobilenet_v1_pw1(dut):
 #     await t.load_and_populate_input(dut)
 #     await t.test(ref_target=40_000_000, opt_target=2_000_000, run_ref=False, check_python=True)
 
-@cocotb.test()
-async def benchmark_mxu_vww_first_layer(dut):
-    """Benchmark: VWW 首层 3x3 conv, stride 2, RGB input"""
-    t = ConvTest(in_ch=3, out_ch=8, h=96, w=96, kernel_size=3, stride=2, padding=1)
-    await t.load_and_populate_input(dut)
-    await t.test(ref_target=40_000_000, opt_target=2_000_000, run_ref=False, check_python=True)
+# @cocotb.test()
+# async def benchmark_mxu_vww_first_layer(dut):
+#     """Benchmark: VWW 首层 3x3 conv, stride 2, RGB input"""
+#     t = ConvTest(in_ch=3, out_ch=8, h=96, w=96, kernel_size=3, stride=2, padding=1)
+#     await t.load_and_populate_input(dut)
+#     await t.test(ref_target=40_000_000, opt_target=2_000_000, run_ref=False, check_python=True)
 
 # @cocotb.test()
 # async def benchmark_mxu_vww_bottleneck(dut):

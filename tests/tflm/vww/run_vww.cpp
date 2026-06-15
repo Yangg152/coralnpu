@@ -67,10 +67,10 @@ constexpr int kMaxLogEntries = 128;
 extern "C" {
 // 内存与日志 Buffer 定义
 constexpr size_t kTensorArenaSize = 512 * 1024;
-uint8_t tensor_arena[kTensorArenaSize] __attribute__((section(".data"), aligned(16)));
+uint8_t tensor_arena[kTensorArenaSize] __attribute__((section(".extdata"), aligned(16)));
 
 // 增大 Buffer 以容纳完整的 TFLM 内存报告
-char debug_log_buffer[2048] __attribute__((section(".data"), aligned(16)));
+char debug_log_buffer[2048] __attribute__((section(".extdata"), aligned(16)));
 static int global_log_idx = 0;
 
 // 实现 __wrap_DebugLog，它会捕获所有 MicroPrintf 的输出

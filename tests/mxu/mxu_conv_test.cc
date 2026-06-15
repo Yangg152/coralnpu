@@ -11,7 +11,7 @@
 
 namespace {
 // 适当增大 Buffer 以容纳 MobileNet 的层
-constexpr size_t kMaxTensorSize = 128 * 1024; 
+constexpr size_t kMaxTensorSize = 1024 * 1024; 
 constexpr size_t kMaxChannels = 1024;
 }  // namespace
 
@@ -47,13 +47,13 @@ int32_t padding_height __attribute__((section(".data"))) = 0;
 int stride_width __attribute__((section(".data"))) = 1;
 int stride_height __attribute__((section(".data"))) = 1;
 
-int8_t input_data[kMaxTensorSize] __attribute__((section(".data"), aligned(16)));
-int8_t output_data[kMaxTensorSize] __attribute__((section(".data"), aligned(16)));
-int8_t filter_data[kMaxTensorSize] __attribute__((section(".data"), aligned(16)));
-int32_t bias_data[kMaxChannels] __attribute__((section(".data"), aligned(16)));
+int8_t input_data[kMaxTensorSize] __attribute__((section(".extdata"), aligned(16)));
+int8_t output_data[kMaxTensorSize] __attribute__((section(".extdata"), aligned(16)));
+int8_t filter_data[kMaxTensorSize] __attribute__((section(".extdata"), aligned(16)));
+int32_t bias_data[kMaxChannels] __attribute__((section(".extdata"), aligned(16)));
 
-int32_t output_multiplier[kMaxChannels] __attribute__((section(".data"), aligned(16)));
-int32_t output_shift[kMaxChannels] __attribute__((section(".data"), aligned(16)));
+int32_t output_multiplier[kMaxChannels] __attribute__((section(".extdata"), aligned(16)));
+int32_t output_shift[kMaxChannels] __attribute__((section(".extdata"), aligned(16)));
 
 void prep() {
   input_shape_.ReplaceWith(4, input_shape);

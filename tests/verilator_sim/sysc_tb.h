@@ -24,7 +24,7 @@
 #include "tests/verilator_sim/fifo.h"
 // sc_core needs to be included before verilator header
 using namespace sc_core;      // NOLINT(build/namespaces)
-#include "verilated_fst_c.h"  // NOLINT(build/include_subdir): From verilator.
+#include "verilated_vcd_c.h"  // NOLINT(build/include_subdir): From verilator.
 
 using sc_dt::sc_bv;
 
@@ -129,7 +129,7 @@ struct Sysc_tb : public sc_module {
     clock_(clock);
 
     // Verilated::commandArgs(argc, argv);
-    tf_ = new VerilatedFstC;
+    tf_ = new VerilatedVcdC;
   }
 
   ~Sysc_tb() {
@@ -178,7 +178,7 @@ struct Sysc_tb : public sc_module {
     resetn = 1;
 
     design->trace(tf_, 99);
-    path += ".fst";
+    path += ".vcd";
     Verilated::traceEverOn(true);
     tf_->open(path.c_str());
     printf("\nInfo: default timescale unit used for tracing: 1 ps (%s)\n",
@@ -256,7 +256,7 @@ struct Sysc_tb : public sc_module {
   sc_in<bool> clock_;
 
   uint32_t sim_time_ = 0;
-  VerilatedFstC *tf_ = nullptr;
+  VerilatedVcdC *tf_ = nullptr;
 
   void tb_posedge() {
     if (tf_ && started_) { tf_->dump(sim_time_++); tf_->flush(); }

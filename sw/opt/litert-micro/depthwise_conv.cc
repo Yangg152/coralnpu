@@ -190,59 +190,52 @@ void DepthwiseConvPerChannelPatchCenter3x3Reuse6(
 
   const int batches = MatchingDim(in_shape, 0, out_shape, 0);
   const int out_d = MatchingDim(f_shape, 3, out_shape, 3);
-  // const int in_h = in_shape.Dims(1);
-  // const int in_w = in_shape.Dims(2);
   const int in_d = in_shape.Dims(3);
-  // const int f_h = f_shape.Dims(1);
-  // const int f_w = f_shape.Dims(2);
-  const int out_patch_h = out_y_ed - out_y_st;
   const int out_patch_w = out_x_ed - out_x_st;
-  const int32_t acc_shape_[] = {1, out_patch_h, out_patch_w, out_d};
-  const tflite::RuntimeShape acc_shape(4, acc_shape_);
 
-  auto accs =
-      make_aligned_array<int32_t>(16, out_patch_h * out_patch_w * out_d);
+  // Only allocate one row of accumulators instead of the entire patch.
+  auto accs = make_aligned_array<int32_t>(16, out_patch_w * out_d);
   TFLITE_DCHECK_NE(accs, nullptr);
 
   for (int batch = 0; batch < batches; ++batch) {
-    // Accumulators in memory are at this scope.
-    int in_ch = 0;
-    size_t in_ch_rem = in_d;
-    while (in_ch_rem > 0) {
-      // Scalable with vlmax.
-      const size_t vl = __riscv_vsetvl_e32m4(in_ch_rem);
-      for (int m = 0; m < depth_multiplier; ++m) {
-        const int out_ch = m + in_ch * depth_multiplier;
-        // Load filter
-        const vint8m1_t f00_v8 =
-            __riscv_vlse8_v_i8m1(&f_data[Offset(f_shape, 0, 0, 0, out_ch)],
-                                 sizeof(int8_t) * depth_multiplier, vl);
-        const vint8m1_t f01_v8 =
-            __riscv_vlse8_v_i8m1(&f_data[Offset(f_shape, 0, 0, 1, out_ch)],
-                                 sizeof(int8_t) * depth_multiplier, vl);
-        const vint8m1_t f02_v8 =
-            __riscv_vlse8_v_i8m1(&f_data[Offset(f_shape, 0, 0, 2, out_ch)],
-                                 sizeof(int8_t) * depth_multiplier, vl);
-        const vint8m1_t f10_v8 =
-            __riscv_vlse8_v_i8m1(&f_data[Offset(f_shape, 0, 1, 0, out_ch)],
-                                 sizeof(int8_t) * depth_multiplier, vl);
-        const vint8m1_t f11_v8 =
-            __riscv_vlse8_v_i8m1(&f_data[Offset(f_shape, 0, 1, 1, out_ch)],
-                                 sizeof(int8_t) * depth_multiplier, vl);
-        const vint8m1_t f12_v8 =
-            __riscv_vlse8_v_i8m1(&f_data[Offset(f_shape, 0, 1, 2, out_ch)],
-                                 sizeof(int8_t) * depth_multiplier, vl);
-        const vint8m1_t f20_v8 =
-            __riscv_vlse8_v_i8m1(&f_data[Offset(f_shape, 0, 2, 0, out_ch)],
-                                 sizeof(int8_t) * depth_multiplier, vl);
-        const vint8m1_t f21_v8 =
-            __riscv_vlse8_v_i8m1(&f_data[Offset(f_shape, 0, 2, 1, out_ch)],
-                                 sizeof(int8_t) * depth_multiplier, vl);
-        const vint8m1_t f22_v8 =
-            __riscv_vlse8_v_i8m1(&f_data[Offset(f_shape, 0, 2, 2, out_ch)],
-                                 sizeof(int8_t) * depth_multiplier, vl);
-        for (int out_y = out_y_st; out_y < out_y_ed; ++out_y) {
-          const int in_y_orig = (out_y * stride_h) - pad_h;
+    for (int out_y = out_y_st; out_y < out_y_ed; ++out_y) {
+      const int in_y_orig = (out_y * stride_h) - pad_h;
+
+      int in_ch = 0;
+      size_t in_ch_rem = in_d;
+      while (in_ch_rem > 0) {
+        // Scalable with vlmax.
+        const size_t vl = __riscv_vsetvl_e32m4(in_ch_rem);
+        for (int m = 0; m < depth_multiplier; ++m) {
+          const int out_ch = m + in_ch * depth_multiplier;
+          // Load filter
+          const vint8m1_t f00_v8 =
+              __riscv_vlse8_v_i8m1(&f_data[Offset(f_shape, 0, 0, 0, out_ch)],
+                                   sizeof(int8_t) * depth_multiplier, vl);
+          const vint8m1_t f01_v8 =
+              __riscv_vlse8_v_i8m1(&f_data[Offset(f_shape, 0, 0, 1, out_ch)],
+                                   sizeof(int8_t) * depth_multiplier, vl);
+          const vint8m1_t f02_v8 =
+              __riscv_vlse8_v_i8m1(&f_data[Offset(f_shape, 0, 0, 2, out_ch)],
+                                   sizeof(int8_t) * depth_multiplier, vl);
+          const vint8m1_t f10_v8 =
+              __riscv_vlse8_v_i8m1(&f_data[Offset(f_shape, 0, 1, 0, out_ch)],
+                                   sizeof(int8_t) * depth_multiplier, vl);
+          const vint8m1_t f11_v8 =
+              __riscv_vlse8_v_i8m1(&f_data[Offset(f_shape, 0, 1, 1, out_ch)],
+                                   sizeof(int8_t) * depth_multiplier, vl);
+          const vint8m1_t f12_v8 =
+              __riscv_vlse8_v_i8m1(&f_data[Offset(f_shape, 0, 1, 2, out_ch)],
+                                   sizeof(int8_t) * depth_multiplier, vl);
+          const vint8m1_t f20_v8 =
+              __riscv_vlse8_v_i8m1(&f_data[Offset(f_shape, 0, 2, 0, out_ch)],
+                                   sizeof(int8_t) * depth_multiplier, vl);
+          const vint8m1_t f21_v8 =
+              __riscv_vlse8_v_i8m1(&f_data[Offset(f_shape, 0, 2, 1, out_ch)],
+                                   sizeof(int8_t) * depth_multiplier, vl);
+          const vint8m1_t f22_v8 =
+              __riscv_vlse8_v_i8m1(&f_data[Offset(f_shape, 0, 2, 2, out_ch)],
+                                   sizeof(int8_t) * depth_multiplier, vl);
 
           int out_x = out_x_st;
           int in_x_orig = (out_x * stride_w) - pad_w;
@@ -365,10 +358,10 @@ void DepthwiseConvPerChannelPatchCenter3x3Reuse6(
                     [in_ptr] "A"(*in_ptr2), [vl] "r"(vl)
                   : "v1", "v2", "v3", "v4", "v5", "v6", "v7", "vl", "vtype");
             }
-            // Spill accumulators and postprocess later.
-            __riscv_vsse32_v_i32m4(&accs[Offset(acc_shape, 0, out_y - out_y_st,
-                                                out_x - out_x_st, out_ch)],
-                                   sizeof(int32_t) * depth_multiplier, acc, vl);
+            // Spill accumulators - single row layout
+            __riscv_vsse32_v_i32m4(
+                &accs[(out_x - out_x_st) * out_d + out_ch],
+                sizeof(int32_t) * depth_multiplier, acc, vl);
             // End of iteration
             ++out_x;
             in_x_orig += stride_w;
@@ -377,22 +370,20 @@ void DepthwiseConvPerChannelPatchCenter3x3Reuse6(
             in_ptr2 += stride_w * in_d;
           }
         }
+        in_ch += vl;
+        in_ch_rem -= vl;
       }
-      in_ch += vl;
-      in_ch_rem -= vl;
-    }
 
-    for (int out_y = out_y_st; out_y < out_y_ed; ++out_y) {
-      PostprocessAcc(&accs[Offset(acc_shape, 0, out_y - out_y_st, 0, 0)],
-                     bias_data, shift_left, output_multiplier, shift_right,
-                     output_offset, output_activation_min,
+      // Postprocess this row immediately
+      PostprocessAcc(accs.get(), bias_data, shift_left, output_multiplier,
+                     shift_right, output_offset, output_activation_min,
                      output_activation_max,
                      &out_data[Offset(out_shape, batch, out_y, out_x_st, 0)],
                      /*out_w=*/out_patch_w, /*out_d=*/out_d);
     }
   }
 }
-}  // namespace
+}
 
 void DepthwiseConvPerChannel(
     const DepthwiseParams& params, const int32_t* output_multiplier,

@@ -352,7 +352,7 @@ index c3e26d5..fc8af53 100644
 -        args.add("--trace")
 -    for verilog_file in verilog_files:
 -        args.add(verilog_file.path)
-+        args.add("--trace-fst")
++        args.add("--trace")
      args.add_all(verilator_toolchain.extra_vopts)
      args.add_all(ctx.attr.vopts, expand_directories = False)
 +    for verilog_file in verilog_files:

@@ -22,6 +22,7 @@ DEFINES = +define+TB_SUPPORT
 COM_SRCS = $(wildcard $(COM_DIR)/*.sv)
 
 DESIGN_SRCS = \
+	$(DESIGN_DIR)/Sram_256x128.v \
 	$(DESIGN_DIR)/Aligner.sv \
 	$(DESIGN_DIR)/MultiFifo.sv \
 	$(DESIGN_DIR)/rvv_backend_vrf_reg.sv \
@@ -81,7 +82,7 @@ compile:
 		$(COM_SRCS) \
 		$(DESIGN_SRCS) \
 		$(MXU_TOP_TB) \
-		-debug_access+all \
+		-debug_access+all -kdb \
 		+lint=TFIPC-L \
 		-l compile.log 2>&1 | tee compile_screen.log
 

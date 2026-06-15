@@ -52,7 +52,7 @@ SECTIONS {
       *(.data.rel.ro)
       *(.data.rel.ro.*)
       . = ALIGN(16);
-    } > ITCM
+    } > EXTMEM
 
     /* Static Thread Local Storage template */
     .tdata : {
